@@ -126,6 +126,20 @@ def sync_all_data():
         log("📊 Syncing all market data...")
         log("═" * 50)
         
+        log("☁️  Checking for updates from Cloud (GitHub)...")
+        import subprocess
+        try:
+            # First try pulling the latest pre-fetched CSVs from the GitHub repository 
+            # (which are generated every 15 mins by GitHub Actions)
+            # Use strict host key checking = no to prevent ssh prompts if ssh is used
+            subprocess.run(["git", "-c", "core.sshCommand=ssh -o StrictHostKeyChecking=no", "pull", "origin", "main"], 
+                           check=True, capture_output=True, text=True)
+            log("  ✅ Successfully pulled latest pre-fetched CSVs from GitHub.")
+        except Exception as e:
+            log("  ⚠️ Git pull skipped (offline, no updates, or not a git repo).")
+            log(f"  Debug: {e}")
+
+        log("\nStarting local data engine fallback sync...")
         from data_engine import load_all_data
         df = load_all_data(live_sentiment=True)
         
