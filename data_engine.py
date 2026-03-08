@@ -65,10 +65,30 @@ def fetch_symbol(symbol, name, start_year=DATA_START_YEAR):
     else:
         print(f"  {C.CYAN}[FETCH] {name}: Full download from {start_date}{C.RESET}")
 
+    import time
+    import random
+    
+    df = None
+    max_retries = 30
+    for attempt in range(max_retries):
+        try:
+            df = yf.download(symbol, start=start_date, auto_adjust=True, progress=False)
+            if not df.empty:
+                break
+            else:
+                raise ValueError(f"No data returned for {symbol}")
+        except Exception as e:
+            if attempt < max_retries - 1:
+                sleep_time = random.uniform(2, 5)
+                print(f"  {C.YELLOW}[RETRY] Rate limited or failed for {name}. Retrying in {sleep_time:.1f}s ({attempt+1}/{max_retries})...{C.RESET}")
+                time.sleep(sleep_time)
+            else:
+                # Let the main exception handler catch it on the last attempt
+                raise e
+    
     try:
-        df = yf.download(symbol, start=start_date, auto_adjust=True, progress=False)
-        if df.empty:
-            raise ValueError(f"No data returned for {symbol}")
+        if df is None or df.empty:
+            raise ValueError(f"No data returned for {symbol} after {max_retries} attempts.")
         
         # Flatten multi-level columns if present
         if isinstance(df.columns, pd.MultiIndex):
