@@ -17,6 +17,7 @@ from models.ensemble_classifier import EnsembleClassifier
 from models.regime_detector import RegimeDetector
 from models.range_predictor import RangePredictor
 from models.sr_engine import SREngine
+from models.lstm_classifier import LSTMClassifier
 from analyzers.whipsaw_detector import WhipsawDetector
 from analyzers.iron_condor_analyzer import IronCondorAnalyzer
 from analyzers.bounce_analyzer import BounceAnalyzer
@@ -25,7 +26,7 @@ from analyzers.bounce_analyzer import BounceAnalyzer
 # PAGE CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="David Oracle v1.0",
+    page_title="David Oracle v2.0",
     page_icon="🦅",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -65,10 +66,43 @@ def load_oracle():
     df_raw = load_all_data()
     df, features = engineer_features(df_raw)
     
+    # Regime classification function
+    def classify_regime(row):
+        adx = row.get('adx', 20)
+        vol = row.get('realized_vol_20', 0.15)
+        if adx > 25: return "TRENDING"
+        elif vol > 0.25: return "VOLATILE"
+        else: return "CHOPPY"
+    
+    # Try to load pre-trained regime models (from train_models.py / GitHub Actions)
+    import joblib
+    from utils import MODEL_DIR
+    regime_models_path = os.path.join(MODEL_DIR, "regime_models.pkl")
+    
+    if os.path.exists(regime_models_path):
+        regime_models = joblib.load(regime_models_path)
+    else:
+        # Fallback: train from scratch (slow, first run only)
+        regime_models = {}
+        for regime in ["TRENDING", "CHOPPY", "VOLATILE"]:
+            df_regime = df[df.apply(classify_regime, axis=1) == regime].copy()
+            if len(df_regime) < 200:
+                df_regime = df.copy()
+            m = EnsembleClassifier()
+            m.train(df_regime, features, verbose=False)
+            regime_models[regime] = m
+    
+    # Load (or train) main ensemble
     ensemble = EnsembleClassifier()
     if not ensemble.load():
         ensemble.train(df, features)
         ensemble.save()
+
+    # Load (or train) LSTM
+    lstm = LSTMClassifier(seq_len=10)
+    if not lstm.load():
+        lstm.train(df, features, verbose=False)
+        lstm.save()
         
     regime = RegimeDetector()
     if not regime.load():
@@ -90,6 +124,9 @@ def load_oracle():
         "df": df,
         "features": features,
         "ensemble": ensemble,
+        "regime_models": regime_models,
+        "classify_regime": classify_regime,
+        "lstm": lstm,
         "regime": regime,
         "range_pred": range_pred,
         "sr": sr,
@@ -112,8 +149,17 @@ last_date = df["date"].iloc[-1].strftime("%Y-%m-%d")
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/eagle.png", width=80)
     st.title("David Oracle")
+    st.caption("v2.0 — 1-Day Regime Engine")
     st.markdown(f"**NIFTY**: {current_price:,.2f}")
     st.markdown(f"**VIX**: {vix:.2f}")
+    
+    # PCR and FII/DII in sidebar
+    pcr_val = float(df["pcr"].iloc[-1]) if "pcr" in df.columns else 1.0
+    fii_val = float(df["fii_net"].iloc[-1]) if "fii_net" in df.columns else 0.0
+    dii_val = float(df["dii_net"].iloc[-1]) if "dii_net" in df.columns else 0.0
+    st.markdown(f"**PCR**: {pcr_val:.2f}")
+    st.markdown(f"**FII Net**: ₹{fii_val:,.0f} Cr")
+    st.markdown(f"**DII Net**: ₹{dii_val:,.0f} Cr")
     st.markdown(f"**Date**: {last_date}")
     
     st.markdown("---")
@@ -137,9 +183,30 @@ with st.sidebar:
 if mode == "Dashboard":
     st.title("🦅 Prophet Dashboard")
     
-    # 1. Main Predictions
-    pred = oracle["ensemble"].predict_today(df)
-    regime_info = oracle["regime"].get_regime_with_micro_direction(df, pred)
+    # 1. Main Predictions — Hybrid approach (Regime-Trees + LSTM)
+    classify_fn = oracle["classify_regime"]
+    latest_row = df.iloc[-1]
+    current_regime = classify_fn(latest_row)
+    
+    # Tree Model
+    regime_model = oracle["regime_models"].get(current_regime, oracle["ensemble"])
+    tree_pred = regime_model.predict_today(df)
+    
+    # LSTM Model
+    lstm_pred = oracle["lstm"].predict_today(df)
+    
+    # Hybrid Calculation
+    prob_up = (tree_pred["prob_up"] + lstm_pred["prob_up"]) / 2.0
+    prob_down = (tree_pred["prob_down"] + lstm_pred["prob_down"]) / 2.0
+    prob_sid = (tree_pred["prob_sideways"] + lstm_pred["prob_sideways"]) / 2.0
+    
+    probs = {UP: prob_up, DOWN: prob_down, SIDEWAYS: prob_sid}
+    hybrid_dir = max(probs, key=probs.get)
+    hybrid_conf = probs[hybrid_dir]
+    
+    pred = {"direction": hybrid_dir, "confidence": hybrid_conf}
+    
+    regime_info = oracle["regime"].get_regime_with_micro_direction(df, tree_pred)
     whipsaw = oracle["whipsaw"].analyze(df)
     
     col1, col2, col3 = st.columns(3)
@@ -206,6 +273,36 @@ if mode == "Dashboard":
         for key, val in whipsaw["signals"].items():
             icon = "🔴" if val["weight"] > 0 else "🟢"
             st.text(f"{icon} {key}: {val['signal']}")
+
+    st.markdown("---")
+    
+    # 1.5 Sentiment Analysis (PCR & FII/DII)
+    st.subheader("📊 Market Sentiment")
+    sent_c1, sent_c2, sent_c3 = st.columns(3)
+    
+    # Safely get sentiment metrics
+    current_pcr = float(df["pcr"].iloc[-1]) if "pcr" in df.columns else 1.0
+    fii_net = float(df["fii_net"].iloc[-1]) if "fii_net" in df.columns else 0.0
+    dii_net = float(df["dii_net"].iloc[-1]) if "dii_net" in df.columns else 0.0
+    
+    with sent_c1:
+        pcr_color = "green" if current_pcr < 0.8 else "red" if current_pcr > 1.2 else "orange"
+        st.markdown(f"<div class='metric-card'><h4>Put-Call Ratio</h4><h2 style='color:{pcr_color};'>{current_pcr:.2f}</h2>", unsafe_allow_html=True)
+        if current_pcr < 0.8:
+            st.caption("Oversold / Bullish Support")
+        elif current_pcr > 1.2:
+            st.caption("Overbought / Bearish Resistance")
+        else:
+            st.caption("Neutral Sentiment")
+        st.markdown("</div>", unsafe_allow_html=True)
+        
+    with sent_c2:
+        fii_color = "green" if fii_net > 0 else "red"
+        st.markdown(f"<div class='metric-card'><h4>FII Net Flow (₹ Cr)</h4><h2 style='color:{fii_color};'>{fii_net:,.0f}</h2></div>", unsafe_allow_html=True)
+        
+    with sent_c3:
+        dii_color = "green" if dii_net > 0 else "red"
+        st.markdown(f"<div class='metric-card'><h4>DII Net Flow (₹ Cr)</h4><h2 style='color:{dii_color};'>{dii_net:,.0f}</h2></div>", unsafe_allow_html=True)
 
     st.markdown("---")
     

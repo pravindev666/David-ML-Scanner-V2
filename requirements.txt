@@ -7,3 +7,5 @@ lightgbm
 catboost
 hmmlearn
 scipy
+nsepython
+jugaad-data

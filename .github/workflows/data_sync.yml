@@ -1,10 +1,11 @@
-name: Market Data Sync
+name: Market Data Sync & Model Training
 
 on:
   schedule:
-    # Runs every 15 minutes from 3:15 UTC to 11:30 UTC (8:45 IST to 5:00 PM IST)
-    # Monday through Friday
-    - cron: '*/15 3-11 * * 1-5'
+    # Every 15 mins during Indian market hours (3:15 UTC to 10:30 UTC = 8:45 AM to 4:00 PM IST)
+    - cron: '*/15 3-10 * * 1-5'
+    # Full model retrain once daily at 11:00 UTC (4:30 PM IST, after market close)
+    - cron: '0 11 * * 1-5'
   workflow_dispatch: # Allows manual trigger
 
 permissions:
@@ -28,30 +29,43 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
+          pip install -r requirements.txt
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Sync Market Data
+        run: python data_engine.py
+
+      - name: Determine if Model Retrain Needed
+        id: check_retrain
+        run: |
+          HOUR=$(date -u +%H)
+          MINUTE=$(date -u +%M)
+          # Retrain at 11:00 UTC (post-market) or on manual trigger
+          if [ "$HOUR" = "11" ] && [ "$MINUTE" -lt "15" ]; then
+            echo "retrain=true" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "retrain=true" >> $GITHUB_OUTPUT
           else
-            pip install pandas numpy yfinance scikit-learn xgboost lightgbm catboost hmmlearn scipy
+            echo "retrain=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Run Data Sync Script
-        run: |
-          # The script is now at the root of the repository
-          python data_engine.py
+      - name: Train Models (Post-Market)
+        if: steps.check_retrain.outputs.retrain == 'true'
+        run: python train_models.py
 
       - name: Commit and Push Changes
         run: |
           git config --global user.name "David Data Bot"
           git config --global user.email "bot@david-ml.com"
           
-          # Stage the updated CSV files
-          # data folder is now at the root of the repository
+          # Stage data + trained models
           git add data/*.csv
+          git add saved_models/*.pkl 2>/dev/null || true
           
           # Only commit if there are changes
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "Auto-sync: Market data update $(date +'%Y-%m-%d %H:%M')"
+            git commit -m "Auto-sync: Data + Models $(date +'%Y-%m-%d %H:%M')"
             git push
           fi

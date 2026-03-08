@@ -12,7 +12,7 @@ import numpy as np
 from utils import DIRECTION_THRESHOLD, UP, DOWN, SIDEWAYS
 
 
-def engineer_features(df, target_horizon=5):
+def engineer_features(df, target_horizon=1):
     """
     Build the full feature matrix from raw OHLCV + VIX + S&P data.
     
@@ -177,6 +177,29 @@ def engineer_features(df, target_horizon=5):
         df["vol_ratio_20"] = 1.0
         df["obv_trend"] = 0.0
     
+    # ═══════════════════════════════════════════════════════════════════════
+    # 10. SENTIMENT (7 features)
+    # ═══════════════════════════════════════════════════════════════════════
+    if "pcr" in df.columns:
+        df["pcr_val"] = df["pcr"]
+        df["pcr_sma_5"] = df["pcr"].rolling(5).mean()
+        df["pcr_change"] = df["pcr"].diff()
+    else:
+        df["pcr_val"] = 1.0
+        df["pcr_sma_5"] = 1.0
+        df["pcr_change"] = 0.0
+        
+    if "fii_net" in df.columns and "dii_net" in df.columns:
+        df["fii_flow"] = df["fii_net"] / 1000.0  # scale for ML
+        df["dii_flow"] = df["dii_net"] / 1000.0
+        df["inst_net_flow"] = df["fii_flow"] + df["dii_flow"]
+        df["fii_trend_5"] = df["fii_flow"].rolling(5).sum()
+    else:
+        df["fii_flow"] = 0.0
+        df["dii_flow"] = 0.0
+        df["inst_net_flow"] = 0.0
+        df["fii_trend_5"] = 0.0
+
     # ═══════════════════════════════════════════════════════════════════════
     # TARGET VARIABLE (NOT a feature — excluded from ML input)
     # ═══════════════════════════════════════════════════════════════════════
