@@ -285,6 +285,38 @@ if mode == "Dashboard":
             icon = "🔴" if val["weight"] > 0 else "🟢"
             st.text(f"{icon} {key}: {val['signal']}")
 
+    # 1.5 Intelligence Breakdown (New Section)
+    st.markdown("---")
+    st.markdown("### 🧬 Intelligence Breakdown")
+    b_col1, b_col2, b_col3 = st.columns(3)
+    
+    with b_col1:
+        st.markdown("**🌳 Tree Ensemble (Regime)**")
+        t_dir = tree_pred["direction"]
+        t_conf = tree_pred["confidence"] * 100
+        t_color = "green" if t_dir == UP else "red" if t_dir == DOWN else "orange"
+        st.markdown(f"<span style='color:{t_color}; font-size:24px; font-weight:bold;'>{t_dir}</span> ({t_conf:.0f}%)", unsafe_allow_html=True)
+        st.caption("Specialized logic for the current market regime.")
+        
+    with b_col2:
+        st.markdown("**🧠 LSTM (Sequence)**")
+        if lstm is not None:
+            # Re-calculating for display clarity
+            lstm_p = lstm.predict_today(df) 
+            l_dir = lstm_p["direction"]
+            l_conf = lstm_p["confidence"] * 100
+            l_color = "green" if l_dir == UP else "red" if l_dir == DOWN else "orange"
+            st.markdown(f"<span style='color:{l_color}; font-size:24px; font-weight:bold;'>{l_dir}</span> ({l_conf:.0f}%)", unsafe_allow_html=True)
+            st.caption("Pattern recognition over the last 10 days.")
+        else:
+            st.markdown("*LSTM Offline (No PyTorch installed)*")
+            
+    with b_col3:
+        st.markdown("**🦅 Hybrid Verdict**")
+        h_color = "green" if pred["direction"] == UP else "red" if pred["direction"] == DOWN else "orange"
+        st.markdown(f"<span style='color:{h_color}; font-size:24px; font-weight:bold;'>{pred['direction']}</span> ({pred['confidence']*100:.0f}%)", unsafe_allow_html=True)
+        st.caption("The final weighted decision for your trade.")
+
     st.markdown("---")
     
     # 1.5 Sentiment Analysis (PCR & FII/DII)
