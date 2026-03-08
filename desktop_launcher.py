@@ -23,10 +23,11 @@ from PyQt5.QtWidgets import (
     QPushButton, QLabel, QTabWidget, QTextEdit, QTableWidget,
     QTableWidgetItem, QSplitter, QFrame, QGroupBox, QGridLayout,
     QSpinBox, QSlider, QHeaderView, QSizePolicy, QSystemTrayIcon,
-    QMenu, QAction, QStatusBar, QProgressBar, QShortcut, QScrollArea
+    QMenu, QAction, QStatusBar, QProgressBar, QShortcut, QScrollArea,
+    QComboBox, QDateEdit
 )
 from PyQt5.QtCore import (
-    Qt, QThread, pyqtSignal, pyqtSlot, QTimer, QSize
+    Qt, QThread, pyqtSignal, pyqtSlot, QTimer, QSize, QDate
 )
 from PyQt5.QtGui import (
     QFont, QColor, QPalette, QIcon, QKeySequence, QPixmap
@@ -310,6 +311,7 @@ class DavidOracleWindow(QMainWindow):
         self.tabs.addTab(self.tab_dashboard, "🦅 Dashboard")
         self.tabs.addTab(self.tab_forecast, "📈 Forecast")
         self.tabs.addTab(self.tab_strategy, "🧪 Strategy Lab")
+        self.tabs.addTab(self._build_position_manager_tab(), "🛡️ Position Manager")
         self.tabs.addTab(self.tab_inspector, "📋 Data Inspector")
         self.tabs.addTab(self._build_codex_tab(), "📖 David Codex")
         
@@ -346,7 +348,7 @@ class DavidOracleWindow(QMainWindow):
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
         
-        version = QLabel("v2.0 — Desktop Edition")
+        version = QLabel("v2.1 — Desktop Edition")
         version.setStyleSheet(f"color: {TEXT_DIM}; font-size: 10px; border: none;")
         version.setAlignment(Qt.AlignCenter)
         layout.addWidget(version)
@@ -404,6 +406,22 @@ class DavidOracleWindow(QMainWindow):
         separator2.setFrameShape(QFrame.HLine)
         separator2.setStyleSheet(f"background-color: {DARK_BORDER}; border: none; max-height: 1px;")
         layout.addWidget(separator2)
+        
+        # BUTTON 4: Sync 15m Data
+        self.btn_sync_15m = QPushButton("📉  Sync 15m Data")
+        self.btn_sync_15m.setToolTip("F8 — Fetch latest 15-minute NIFTY + VIX candles")
+        self.btn_sync_15m.clicked.connect(self.on_sync_15m)
+        self.btn_sync_15m.setStyleSheet(self.btn_sync_15m.styleSheet() + f"""
+            QPushButton {{
+                border-left: 3px solid {ACCENT_GREEN};
+            }}
+        """)
+        layout.addWidget(self.btn_sync_15m)
+        
+        separator3 = QFrame()
+        separator3.setFrameShape(QFrame.HLine)
+        separator3.setStyleSheet(f"background-color: {DARK_BORDER}; border: none; max-height: 1px;")
+        layout.addWidget(separator3)
         
         # Mini data inspector
         inspector_title = QLabel("📁 Data Status")
@@ -717,6 +735,171 @@ class DavidOracleWindow(QMainWindow):
         return tab
     
     # ─────────────────────────────────────────────────────────────────────────
+    # TAB: POSITION MANAGER — The Backbone
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    def _build_position_manager_tab(self):
+        tab = QWidget()
+        main_layout = QVBoxLayout(tab)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(f"QScrollArea {{ border: none; background-color: {DARK_BG}; }}")
+        
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(12, 12, 16, 12)
+        layout.setSpacing(12)
+        
+        title = QLabel("🛡️ Position Manager — Your Trading Backbone")
+        title.setStyleSheet(f"color: {ACCENT_GOLD}; font-size: 20px; font-weight: bold;")
+        layout.addWidget(title)
+        
+        # ── SECTION 1: Log Position ──
+        pos_group = QGroupBox("📌 Open Position")
+        pos_layout = QGridLayout(pos_group)
+        
+        pos_layout.addWidget(QLabel("Direction:"), 0, 0)
+        self.pos_direction = QComboBox()
+        self.pos_direction.addItems(["UP (Bull Spread)", "DOWN (Bear Spread)", "SIDEWAYS (Iron Condor)"])
+        pos_layout.addWidget(self.pos_direction, 0, 1)
+        
+        pos_layout.addWidget(QLabel("Entry Price (NIFTY):"), 0, 2)
+        self.pos_entry_price = QSpinBox()
+        self.pos_entry_price.setRange(10000, 50000)
+        self.pos_entry_price.setSingleStep(50)
+        self.pos_entry_price.setValue(24450)
+        pos_layout.addWidget(self.pos_entry_price, 0, 3)
+        
+        pos_layout.addWidget(QLabel("Entry Date:"), 1, 0)
+        self.pos_entry_date = QDateEdit()
+        self.pos_entry_date.setCalendarPopup(True)
+        self.pos_entry_date.setDate(QDate.currentDate())
+        self.pos_entry_date.setDisplayFormat("yyyy-MM-dd")
+        pos_layout.addWidget(self.pos_entry_date, 1, 1)
+        
+        pos_layout.addWidget(QLabel("Expiry:"), 1, 2)
+        self.pos_expiry_date = QDateEdit()
+        self.pos_expiry_date.setCalendarPopup(True)
+        self.pos_expiry_date.setDate(QDate.currentDate().addDays(14))
+        self.pos_expiry_date.setDisplayFormat("yyyy-MM-dd")
+        pos_layout.addWidget(self.pos_expiry_date, 1, 3)
+        
+        self.btn_log_position = QPushButton("📌  Log Position")
+        self.btn_log_position.clicked.connect(self.on_log_position)
+        pos_layout.addWidget(self.btn_log_position, 2, 0, 1, 2)
+        
+        self.btn_close_position = QPushButton("❌  Close Position")
+        self.btn_close_position.clicked.connect(self.on_close_position)
+        pos_layout.addWidget(self.btn_close_position, 2, 2, 1, 2)
+        
+        layout.addWidget(pos_group)
+        
+        # ── SECTION 2: Hold/Exit Signal ──
+        signal_group = QGroupBox("🦅 David's Verdict on Your Position")
+        signal_layout = QVBoxLayout(signal_group)
+        
+        self.signal_verdict = QLabel("Press 📌 Log Position, then 🔴 Fetch Spot to get a HOLD / EXIT signal")
+        self.signal_verdict.setWordWrap(True)
+        self.signal_verdict.setStyleSheet(f"color: {TEXT_DIM}; font-size: 14px; padding: 12px;")
+        signal_layout.addWidget(self.signal_verdict)
+        
+        signal_cards = QHBoxLayout()
+        self.card_hold_exit = MetricCard("SIGNAL", "—", ACCENT_CYAN)
+        self.card_days_held = MetricCard("DAYS HELD", "—", TEXT_PRIMARY)
+        self.card_current_pnl = MetricCard("P&L", "—", TEXT_PRIMARY)
+        signal_cards.addWidget(self.card_hold_exit)
+        signal_cards.addWidget(self.card_days_held)
+        signal_cards.addWidget(self.card_current_pnl)
+        signal_layout.addLayout(signal_cards)
+        
+        layout.addWidget(signal_group)
+        
+        # ── SECTION 3: Recovery Probability ──
+        recovery_group = QGroupBox("📊 Recovery Probability (Historical)")
+        recovery_layout = QVBoxLayout(recovery_group)
+        
+        self.recovery_message = QLabel("Will update when a position is logged and Fetch Spot is clicked.")
+        self.recovery_message.setWordWrap(True)
+        self.recovery_message.setStyleSheet(f"color: {TEXT_DIM}; font-size: 13px; padding: 8px;")
+        recovery_layout.addWidget(self.recovery_message)
+        
+        recovery_cards = QHBoxLayout()
+        self.card_recovery_pct = MetricCard("RECOVERY %", "—", ACCENT_GREEN)
+        self.card_recovery_days = MetricCard("AVG DAYS", "—", ACCENT_CYAN)
+        self.card_scenarios = MetricCard("SIMILAR DIPS", "—", TEXT_PRIMARY)
+        recovery_cards.addWidget(self.card_recovery_pct)
+        recovery_cards.addWidget(self.card_recovery_days)
+        recovery_cards.addWidget(self.card_scenarios)
+        recovery_layout.addLayout(recovery_cards)
+        
+        layout.addWidget(recovery_group)
+        
+        # ── SECTION 4: Expiry Advisor ──
+        expiry_group = QGroupBox("📅 Optimal Expiry Advisor")
+        expiry_layout = QVBoxLayout(expiry_group)
+        
+        self.expiry_recommendation = QLabel("Expiry recommendation will appear after Fetch Spot.")
+        self.expiry_recommendation.setWordWrap(True)
+        self.expiry_recommendation.setStyleSheet(f"color: {ACCENT_CYAN}; font-size: 14px; font-weight: bold; padding: 8px;")
+        expiry_layout.addWidget(self.expiry_recommendation)
+        
+        self.expiry_reasoning = QLabel("")
+        self.expiry_reasoning.setWordWrap(True)
+        self.expiry_reasoning.setStyleSheet(f"color: {TEXT_DIM}; font-size: 12px; padding: 4px 8px;")
+        expiry_layout.addWidget(self.expiry_reasoning)
+        
+        layout.addWidget(expiry_group)
+        
+        # ── SECTION 5: Drawdown Alert ──
+        dd_group = QGroupBox("⚠️ Drawdown Alert System")
+        dd_layout = QVBoxLayout(dd_group)
+        
+        dd_cards = QHBoxLayout()
+        self.card_dd_severity = MetricCard("SEVERITY", "🟢 SAFE", ACCENT_GREEN)
+        self.card_dd_drawdown = MetricCard("DRAWDOWN", "0.0%", TEXT_PRIMARY)
+        self.card_dd_streak = MetricCard("LOSS STREAK", "0", TEXT_PRIMARY)
+        dd_cards.addWidget(self.card_dd_severity)
+        dd_cards.addWidget(self.card_dd_drawdown)
+        dd_cards.addWidget(self.card_dd_streak)
+        dd_layout.addLayout(dd_cards)
+        
+        self.dd_message = QLabel("")
+        self.dd_message.setWordWrap(True)
+        self.dd_message.setStyleSheet(f"color: {TEXT_DIM}; font-size: 12px; padding: 4px 8px;")
+        dd_layout.addWidget(self.dd_message)
+        
+        layout.addWidget(dd_group)
+        
+        # ── SECTION 6: 15-Min Intraday Regime ──
+        regime15_group = QGroupBox("📊 15-Min Intraday Regime")
+        regime15_layout = QVBoxLayout(regime15_group)
+        
+        regime15_cards = QHBoxLayout()
+        self.card_intraday_regime = MetricCard("REGIME", "—", ACCENT_CYAN)
+        self.card_entry_quality = MetricCard("ENTRY QUALITY", "—", TEXT_PRIMARY)
+        self.card_rsi_15m = MetricCard("RSI (15m)", "—", TEXT_PRIMARY)
+        self.card_vix_15m = MetricCard("VIX TREND", "—", TEXT_PRIMARY)
+        regime15_cards.addWidget(self.card_intraday_regime)
+        regime15_cards.addWidget(self.card_entry_quality)
+        regime15_cards.addWidget(self.card_rsi_15m)
+        regime15_cards.addWidget(self.card_vix_15m)
+        regime15_layout.addLayout(regime15_cards)
+        
+        layout.addWidget(regime15_group)
+        
+        # ── Refresh Button ──
+        self.btn_refresh_pm = QPushButton("🔄  Refresh Position Manager")
+        self.btn_refresh_pm.clicked.connect(self.on_refresh_position_manager)
+        layout.addWidget(self.btn_refresh_pm)
+        
+        layout.addStretch()
+        scroll.setWidget(content)
+        main_layout.addWidget(scroll)
+        return tab
+    
+    # ─────────────────────────────────────────────────────────────────────────
     # TAB 5: DAVID CODEX — A-to-Z Trading Guide
     # ─────────────────────────────────────────────────────────────────────────
     
@@ -972,6 +1155,7 @@ class DavidOracleWindow(QMainWindow):
         QShortcut(QKeySequence("F5"), self, self.on_fetch_spot)
         QShortcut(QKeySequence("F6"), self, self.on_sync_data)
         QShortcut(QKeySequence("F7"), self, self.on_train_models)
+        QShortcut(QKeySequence("F8"), self, self.on_sync_15m)
     
     def _setup_status_bar(self):
         self.statusBar().showMessage("Ready — Press F5 to fetch spot prices")
@@ -984,6 +1168,7 @@ class DavidOracleWindow(QMainWindow):
         self.btn_fetch.setEnabled(enabled)
         self.btn_sync.setEnabled(enabled)
         self.btn_train.setEnabled(enabled)
+        self.btn_sync_15m.setEnabled(enabled)
     
     def _start_worker(self, func, callback, status_msg, *args):
         """Start a background worker thread."""
@@ -1048,6 +1233,7 @@ class DavidOracleWindow(QMainWindow):
         if result["success"]:
             self._update_dashboard(result)
             self._update_forecast(result)
+            self._update_position_manager(result)
             self.statusBar().showMessage("✅ Prediction complete!")
             self.dashboard_placeholder.setVisible(False)
         else:
@@ -1084,6 +1270,160 @@ class DavidOracleWindow(QMainWindow):
         else:
             self.statusBar().showMessage(f"❌ Training failed: {result.get('error', 'Unknown')}")
     
+    # ── BUTTON 4: SYNC 15M DATA ──
+    def on_sync_15m(self):
+        self.append_log("\n" + "═" * 50)
+        self._start_worker(
+            backend.sync_15m_data,
+            self._on_sync_15m_done,
+            "📉 Syncing 15-minute data..."
+        )
+    
+    def _on_sync_15m_done(self, result):
+        if result.get("success"):
+            nifty_new = result.get("nifty", {}).get("new_rows", 0)
+            vix_new = result.get("vix", {}).get("new_rows", 0)
+            self.statusBar().showMessage(f"✅ 15m sync complete! NIFTY: +{nifty_new} rows, VIX: +{vix_new} rows")
+        else:
+            self.statusBar().showMessage(f"❌ 15m sync failed: {result.get('error', 'Unknown')}")
+    
+    # ── POSITION MANAGER HANDLERS ──
+    def on_log_position(self):
+        """Log a new position from the UI inputs."""
+        from analyzers.drawdown_monitor import DrawdownMonitor
+        
+        direction_text = self.pos_direction.currentText()
+        if "UP" in direction_text:
+            direction = "UP"
+        elif "DOWN" in direction_text:
+            direction = "DOWN"
+        else:
+            direction = "SIDEWAYS"
+        
+        entry_price = self.pos_entry_price.value()
+        entry_date = self.pos_entry_date.date().toString("yyyy-MM-dd")
+        expiry_date = self.pos_expiry_date.date().toString("yyyy-MM-dd")
+        
+        monitor = DrawdownMonitor()
+        monitor.log_position(direction, entry_price, entry_date, expiry_date)
+        
+        self.append_log(f"📌 Position logged: {direction} at ₹{entry_price:,} on {entry_date} (Expiry: {expiry_date})")
+        self.signal_verdict.setText(f"📌 Position logged: {direction} spread at ₹{entry_price:,}. Click Fetch Spot to get HOLD/EXIT signal.")
+        self.signal_verdict.setStyleSheet(f"color: {ACCENT_CYAN}; font-size: 14px; padding: 12px;")
+        self.statusBar().showMessage(f"📌 Position logged: {direction} at ₹{entry_price:,}")
+    
+    def on_close_position(self):
+        """Close the active position."""
+        from analyzers.drawdown_monitor import DrawdownMonitor
+        monitor = DrawdownMonitor()
+        
+        if not monitor.data.get("active"):
+            self.statusBar().showMessage("⚠️ No active position to close.")
+            return
+        
+        current_price = self.prediction.get("spot_price", 0) if self.prediction else 0
+        if current_price == 0:
+            current_price = monitor.data["active"]["entry_price"]  # neutral close
+        
+        monitor.close_position(current_price)
+        self.append_log(f"❌ Position closed at ₹{current_price:,.2f}")
+        self.signal_verdict.setText("Position closed. Log a new one to continue.")
+        self.signal_verdict.setStyleSheet(f"color: {TEXT_DIM}; font-size: 14px; padding: 12px;")
+        self.card_hold_exit.set_value("—", TEXT_DIM)
+        self.statusBar().showMessage("❌ Position closed.")
+    
+    def on_refresh_position_manager(self):
+        """Manually refresh the Position Manager tab."""
+        if self.prediction and self.prediction.get("success"):
+            self._update_position_manager(self.prediction)
+            self.statusBar().showMessage("🔄 Position Manager refreshed.")
+        else:
+            self.statusBar().showMessage("⚠️ Click Fetch Spot first to get prediction data.")
+    
+    def _update_position_manager(self, pred):
+        """Update all Position Manager panels with latest prediction."""
+        from analyzers.drawdown_monitor import DrawdownMonitor
+        
+        current_price = pred.get("spot_price", 0)
+        confidence = 0
+        if pred.get("tree_prediction"):
+            confidence = pred["tree_prediction"]["confidence"] * 100
+        vix = pred.get("vix_value", 15)
+        regime = pred.get("regime", "CHOPPY")
+        
+        # ─── DRAWDOWN STATUS ───
+        monitor = DrawdownMonitor()
+        dd_status = monitor.get_status(current_price)
+        
+        if dd_status["has_position"]:
+            pos = dd_status["position_info"]
+            entry_dir = pos.get("direction", "UP")
+            entry_price = pos.get("entry_price", current_price)
+            entry_date = pos.get("entry_date", "")
+            
+            # P&L card
+            pnl = dd_status["pnl_pct"]
+            pnl_color = ACCENT_GREEN if pnl >= 0 else ACCENT_RED
+            self.card_current_pnl.set_value(f"{pnl:+.1f}%", pnl_color)
+            
+            # Drawdown severity
+            sev = dd_status["severity"]
+            sev_colors = {"SAFE": ACCENT_GREEN, "CAUTION": ACCENT_GOLD, "DANGER": ACCENT_RED, "EMERGENCY": ACCENT_RED}
+            self.card_dd_severity.set_value(f"{sev}", sev_colors.get(sev, TEXT_DIM))
+            self.card_dd_drawdown.set_value(f"{dd_status['drawdown_pct']:.1f}%", ACCENT_RED if dd_status['drawdown_pct'] > 1 else TEXT_PRIMARY)
+            self.card_dd_streak.set_value(str(dd_status["consecutive_losses"]), ACCENT_RED if dd_status["consecutive_losses"] >= 2 else TEXT_PRIMARY)
+            self.dd_message.setText(dd_status.get("message", ""))
+            
+            # ─── HOLD/EXIT SIGNAL ───
+            try:
+                signal = backend.get_hold_exit_signal(entry_dir, entry_price, entry_date)
+                
+                sig = signal.get("signal", "HOLD")
+                sig_colors = {"HOLD": ACCENT_GREEN, "HEDGE": ACCENT_GOLD, "EXIT": ACCENT_RED}
+                self.card_hold_exit.set_value(sig, sig_colors.get(sig, TEXT_DIM))
+                self.card_days_held.set_value(str(signal.get("days_held", 0)))
+                
+                self.signal_verdict.setText(signal.get("message", ""))
+                self.signal_verdict.setStyleSheet(f"color: {sig_colors.get(sig, TEXT_DIM)}; font-size: 14px; padding: 12px; font-weight: bold;")
+                
+                # ─── RECOVERY PROBABILITY ───
+                recovery = signal.get("recovery_prob")
+                if recovery:
+                    self.card_recovery_pct.set_value(f"{recovery.get('recovery_prob', 0):.0f}%", ACCENT_GREEN if recovery.get('recovery_prob', 0) >= 60 else ACCENT_RED)
+                    self.card_recovery_days.set_value(f"{recovery.get('avg_recovery_days', 0):.0f}d")
+                    self.card_scenarios.set_value(str(recovery.get('similar_scenarios', 0)))
+                    self.recovery_message.setText(recovery.get('message', ''))
+            except Exception as e:
+                self.signal_verdict.setText(f"Error computing signal: {e}")
+        else:
+            self.signal_verdict.setText("No active position. Log one above to get HOLD/EXIT signals.")
+            self.signal_verdict.setStyleSheet(f"color: {TEXT_DIM}; font-size: 14px; padding: 12px;")
+        
+        # ─── EXPIRY ADVISOR (always update) ───
+        try:
+            expiry = backend.get_optimal_expiry(confidence, vix, regime)
+            self.expiry_recommendation.setText(expiry.get("recommendation", ""))
+            reasoning_text = "\n".join([f"• {r}" for r in expiry.get("reasoning", [])])
+            self.expiry_reasoning.setText(reasoning_text)
+        except Exception:
+            pass
+        
+        # ─── 15-MIN INTRADAY REGIME ───
+        try:
+            regime_15m = backend.get_intraday_regime()
+            
+            intra_regime = regime_15m.get("intraday_regime", "UNKNOWN")
+            regime_colors = {"TRENDING_UP": ACCENT_GREEN, "TRENDING_DOWN": ACCENT_RED, "CHOPPY": ACCENT_GOLD, "REVERSAL_RISK": ACCENT_RED}
+            self.card_intraday_regime.set_value(intra_regime, regime_colors.get(intra_regime, TEXT_DIM))
+            
+            eq = regime_15m.get("entry_quality", 50)
+            eq_color = ACCENT_GREEN if eq >= 60 else ACCENT_GOLD if eq >= 40 else ACCENT_RED
+            self.card_entry_quality.set_value(f"{eq}/100", eq_color)
+            
+            self.card_rsi_15m.set_value(f"{regime_15m.get('rsi', 50):.0f}")
+            self.card_vix_15m.set_value(regime_15m.get("vix_trend", "N/A")[:20])
+        except Exception:
+            pass
     # ─────────────────────────────────────────────────────────────────────────
     # DASHBOARD UPDATE
     # ─────────────────────────────────────────────────────────────────────────

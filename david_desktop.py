@@ -520,6 +520,293 @@ def analyze_bounce(df_raw, target_price):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# 7. SYNC 15-MINUTE DATA
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def sync_15m_data():
+    """
+    Fetch and append 15-minute NIFTY + VIX candles using fetch_15m.py.
+    Returns dict with sync results.
+    """
+    from fetch_15m import sync_15m_data as _sync
+    return _sync(log_fn=log)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 8. HOLD / EXIT SIGNAL — The Backbone
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_hold_exit_signal(entry_direction, entry_price, entry_date):
+    """
+    Compare the current prediction against the user's open position.
+    Returns HOLD / HEDGE / EXIT with reasoning.
+    
+    Args:
+        entry_direction: "UP", "DOWN", or "SIDEWAYS"
+        entry_price: float, NIFTY level at entry
+        entry_date: str, "YYYY-MM-DD"
+    
+    Returns:
+        dict with: signal, confidence, message, recovery_prob, days_held
+    """
+    result = {
+        "signal": "HOLD",
+        "confidence": 50,
+        "message": "",
+        "recovery_prob": None,
+        "days_held": 0,
+        "current_regime": None,
+        "current_direction": None,
+    }
+    
+    try:
+        # Get latest prediction
+        pred = predict_now()
+        if not pred["success"]:
+            result["signal"] = "HOLD"
+            result["message"] = "Cannot fetch prediction. Hold current position."
+            return result
+        
+        current_price = pred["spot_price"]
+        current_direction = None
+        current_confidence = 0
+        
+        if pred.get("tree_prediction"):
+            current_direction = pred["tree_prediction"]["direction"]
+            current_confidence = pred["tree_prediction"]["confidence"] * 100
+        
+        result["current_direction"] = current_direction
+        result["current_regime"] = pred.get("regime", "UNKNOWN")
+        result["confidence"] = current_confidence
+        
+        # Days held
+        try:
+            entry_dt = datetime.strptime(entry_date, "%Y-%m-%d")
+            result["days_held"] = (datetime.now() - entry_dt).days
+        except Exception:
+            pass
+        
+        # Recovery probability
+        recovery = get_recovery_probability(current_price, entry_price, entry_direction)
+        result["recovery_prob"] = recovery
+        
+        # ─── Decision Logic ──────────────────────────────────────────
+        entry_dir = entry_direction.upper()
+        
+        # Case 1: Direction still agrees
+        if current_direction and entry_dir in str(current_direction).upper():
+            if current_confidence >= 50:
+                result["signal"] = "HOLD"
+                result["message"] = f"✅ HOLD — Direction still {current_direction} ({current_confidence:.0f}%). Stay in."
+            elif current_confidence >= 40:
+                result["signal"] = "HOLD"
+                result["message"] = f"⚠️ HOLD (cautious) — Direction agrees but confidence weakening ({current_confidence:.0f}%)."
+            else:
+                result["signal"] = "HEDGE"
+                result["message"] = f"⚠️ HEDGE — Direction agrees but confidence very low ({current_confidence:.0f}%). Add protection."
+        
+        # Case 2: Direction flipped
+        elif current_direction:
+            if current_confidence >= 55:
+                result["signal"] = "EXIT"
+                result["message"] = f"🔴 EXIT — Direction flipped to {current_direction} ({current_confidence:.0f}%). Close position."
+            elif current_confidence >= 40:
+                result["signal"] = "HEDGE"
+                result["message"] = f"⚠️ HEDGE — Direction shifted to {current_direction} ({current_confidence:.0f}%). Consider hedging."
+            else:
+                result["signal"] = "HOLD"
+                result["message"] = f"🟡 HOLD — Direction unclear ({current_direction} at {current_confidence:.0f}%). Wait for clarity."
+        
+        # Case 3: Regime danger
+        if pred.get("regime") == "VOLATILE" and entry_dir != "SIDEWAYS":
+            if result["signal"] != "EXIT":
+                result["signal"] = "HEDGE"
+                result["message"] += " ⚠️ Regime is VOLATILE — tighten stops."
+        
+    except Exception as e:
+        result["message"] = f"Error: {e}"
+    
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 9. RECOVERY PROBABILITY — Historical drawdown analysis
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_recovery_probability(current_price, entry_price, direction):
+    """
+    Scan 15 years of NIFTY history for similar drawdowns.
+    Returns recovery probability and average recovery days.
+    
+    Args:
+        current_price: Current NIFTY level
+        entry_price: Entry NIFTY level
+        direction: "UP" or "DOWN"
+    """
+    result = {
+        "drawdown_pct": 0.0,
+        "recovery_prob": 0.0,
+        "avg_recovery_days": 0.0,
+        "max_recovery_days": 0,
+        "similar_scenarios": 0,
+        "message": "",
+    }
+    
+    try:
+        from data_engine import load_all_data
+        df = load_all_data(live_sentiment=False)
+        
+        # Calculate current drawdown
+        if direction.upper() == "UP":
+            dd_pct = ((current_price - entry_price) / entry_price) * 100
+        else:
+            dd_pct = ((entry_price - current_price) / entry_price) * 100
+        
+        result["drawdown_pct"] = round(dd_pct, 2)
+        
+        if dd_pct >= 0:
+            result["recovery_prob"] = 100.0
+            result["message"] = "You're in profit! No recovery needed."
+            return result
+        
+        # Find similar historical drawdowns
+        abs_dd = abs(dd_pct)
+        dd_tolerance = max(0.5, abs_dd * 0.3)  # 30% tolerance band
+        
+        closes = df["close"].values
+        recoveries = []
+        
+        for i in range(50, len(closes) - 30):
+            # Look for similar drops
+            for window in [1, 2, 3, 5]:
+                if i + window >= len(closes):
+                    continue
+                drop = ((closes[i + window] - closes[i]) / closes[i]) * 100
+                
+                if direction.upper() == "UP":
+                    historical_dd = drop  # negative = drawdown for bulls
+                else:
+                    historical_dd = -drop  # positive move = drawdown for bears
+                
+                if abs(historical_dd - (-abs_dd)) < dd_tolerance:
+                    # Found similar drawdown — check recovery
+                    recovery_found = False
+                    for j in range(i + window + 1, min(i + window + 31, len(closes))):
+                        if direction.upper() == "UP":
+                            recovery = ((closes[j] - closes[i]) / closes[i]) * 100
+                        else:
+                            recovery = ((closes[i] - closes[j]) / closes[i]) * 100
+                        
+                        if recovery >= 0:
+                            recoveries.append(j - (i + window))
+                            recovery_found = True
+                            break
+                    
+                    if not recovery_found:
+                        recoveries.append(-1)  # did not recover within 30 days
+        
+        if recoveries:
+            recovered = [r for r in recoveries if r > 0]
+            result["similar_scenarios"] = len(recoveries)
+            result["recovery_prob"] = round((len(recovered) / len(recoveries)) * 100, 1)
+            
+            if recovered:
+                result["avg_recovery_days"] = round(np.mean(recovered), 1)
+                result["max_recovery_days"] = max(recovered)
+            
+            if result["recovery_prob"] >= 70:
+                result["message"] = f"📊 {result['recovery_prob']:.0f}% of similar {abs_dd:.1f}% dips recovered in ~{result['avg_recovery_days']:.0f} days. HOLD."
+            elif result["recovery_prob"] >= 50:
+                result["message"] = f"⚠️ {result['recovery_prob']:.0f}% recovery rate for {abs_dd:.1f}% dips. Monitor closely."
+            else:
+                result["message"] = f"🔴 Only {result['recovery_prob']:.0f}% recovery rate. This may be a regime shift, not a dip."
+        else:
+            result["message"] = "Not enough historical data for this drawdown level."
+    
+    except Exception as e:
+        result["message"] = f"Recovery analysis error: {e}"
+    
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 10. OPTIMAL EXPIRY SELECTOR
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_optimal_expiry(confidence, vix_value, regime):
+    """
+    Recommend near or far expiry based on conviction, VIX, and regime.
+    
+    Returns:
+        dict with: recommendation, expiry_type, reasoning
+    """
+    reasons = []
+    score = 0  # positive = near expiry, negative = far expiry
+    
+    # Confidence factor
+    if confidence >= 65:
+        score += 2
+        reasons.append(f"High confidence ({confidence:.0f}%) → near expiry captures more premium")
+    elif confidence >= 50:
+        score += 0
+        reasons.append(f"Moderate confidence ({confidence:.0f}%) → either works")
+    else:
+        score -= 2
+        reasons.append(f"Low confidence ({confidence:.0f}%) → far expiry for wider breakeven")
+    
+    # VIX factor
+    if vix_value > 22:
+        score -= 2
+        reasons.append(f"VIX high ({vix_value:.1f}) → far expiry (vol crush will help)")
+    elif vix_value > 16:
+        score -= 1
+        reasons.append(f"VIX moderate ({vix_value:.1f}) → slight preference for far")
+    else:
+        score += 1
+        reasons.append(f"VIX low ({vix_value:.1f}) → near expiry fine")
+    
+    # Regime factor
+    if regime == "TRENDING":
+        score += 1
+        reasons.append("TRENDING regime → near expiry (directional moves are fast)")
+    elif regime == "VOLATILE":
+        score -= 2
+        reasons.append("VOLATILE regime → far expiry (need time buffer)")
+    elif regime == "CHOPPY":
+        score -= 1
+        reasons.append("CHOPPY regime → far expiry (choppy markets need patience)")
+    
+    # Decision
+    if score >= 2:
+        expiry_type = "NEAR"
+        recommendation = "📅 NEAR EXPIRY (current week / next week)"
+    elif score <= -2:
+        expiry_type = "FAR"
+        recommendation = "📅 FAR EXPIRY (2-3 weeks out)"
+    else:
+        expiry_type = "MEDIUM"
+        recommendation = "📅 MEDIUM EXPIRY (1-2 weeks out)"
+    
+    return {
+        "recommendation": recommendation,
+        "expiry_type": expiry_type,
+        "score": score,
+        "reasoning": reasons,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 11. 15-MIN INTRADAY REGIME
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_intraday_regime():
+    """Get the current intraday regime from 15-minute data."""
+    from analyzers.regime_15m import Regime15mDetector
+    detector = Regime15mDetector()
+    return detector.analyze()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # SELF-TEST
 # ═══════════════════════════════════════════════════════════════════════════════
 
