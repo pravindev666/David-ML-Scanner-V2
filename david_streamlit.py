@@ -171,10 +171,10 @@ with st.sidebar:
     ])
     
     st.markdown("---")
-    if st.button("♻️ Sync Data & Retrain"):
-        with st.spinner("Fetching latest data and retraining..."):
+    if st.button("🔄 Refresh Data & Predictions"):
+        with st.spinner("Fetching latest spot price..."):
             st.cache_resource.clear()
-        st.success("Data synced! Reloading...")
+        st.success("Data refreshed! Predictions updated with latest spot.")
         st.rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
