@@ -204,18 +204,12 @@ if lstm is not None:
     lstm_pred = lstm.predict_today(df)
 
 # Determine final prediction:
-# If LSTM available → Hybrid (averaged). Otherwise → Trees only.
+# Always use Trees (63.3% backtest) — LSTM shown as second opinion only.
+# This ensures localhost and Streamlit Cloud show the SAME verdict.
+pred = tree_pred
 if lstm_pred is not None:
-    prob_up = (tree_pred["prob_up"] + lstm_pred["prob_up"]) / 2.0
-    prob_down = (tree_pred["prob_down"] + lstm_pred["prob_down"]) / 2.0
-    prob_sid = (tree_pred["prob_sideways"] + lstm_pred["prob_sideways"]) / 2.0
-    probs = {UP: prob_up, DOWN: prob_down, SIDEWAYS: prob_sid}
-    hybrid_dir = max(probs, key=probs.get)
-    hybrid_conf = probs[hybrid_dir]
-    pred = {"direction": hybrid_dir, "confidence": hybrid_conf}
-    engine_label = "Hybrid (Trees + LSTM)"
+    engine_label = "Trees (Primary) + LSTM (Advisory)"
 else:
-    pred = tree_pred
     engine_label = "Trees Only (No LSTM)"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -323,10 +317,7 @@ if mode == "Dashboard":
         st.markdown("**🦅 Final Verdict**")
         h_color = "green" if pred["direction"] == UP else "red" if pred["direction"] == DOWN else "orange"
         st.markdown(f"<span style='color:{h_color}; font-size:24px; font-weight:bold;'>{pred['direction']}</span> ({pred['confidence']*100:.0f}%)", unsafe_allow_html=True)
-        if lstm_pred is not None:
-            st.caption("Hybrid average of Trees + LSTM.")
-        else:
-            st.caption("Same as Tree Ensemble (no LSTM).")
+        st.caption("Same as Trees — the primary model (63% OOS accuracy).")
 
     # ── Row 3: Market Sentiment ──
     st.markdown("---")
