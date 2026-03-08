@@ -252,14 +252,45 @@ def fetch_sentiment_data(live=True):
 def load_all_data(live_sentiment=True):
     """
     Fetch and merge NIFTY + VIX + S&P 500 into a single DataFrame.
-    Returns a clean, merged DataFrame ready for feature engineering.
+    
+    When live_sentiment=False (Streamlit Cloud), skip ALL network calls
+    and just read the CSV files deposited by the GitHub Action every 15 min.
     """
     print(f"\n{C.header('DATA ENGINE: Loading Market Data')}")
     print(f"{'─'*50}")
     
-    nifty = fetch_symbol(NIFTY_SYMBOL, "nifty")
-    vix = fetch_symbol(VIX_SYMBOL, "vix")
-    sp500 = fetch_symbol(SP500_SYMBOL, "sp500")
+    if live_sentiment:
+        # === LIVE MODE (GitHub Actions / Local) ===
+        # Actually fetch from Yahoo Finance and NSE
+        nifty = fetch_symbol(NIFTY_SYMBOL, "nifty")
+        vix = fetch_symbol(VIX_SYMBOL, "vix")
+        sp500 = fetch_symbol(SP500_SYMBOL, "sp500")
+    else:
+        # === CACHE MODE (Streamlit Cloud) ===
+        # Zero network calls. Just read the CSVs from the repo.
+        print(f"  {C.CYAN}[CACHE MODE] Reading saved data from GitHub Action (no network calls){C.RESET}")
+        
+        nifty_path = _csv_path("nifty")
+        vix_path = _csv_path("vix")
+        sp500_path = _csv_path("sp500")
+        
+        if os.path.exists(nifty_path):
+            nifty = pd.read_csv(nifty_path, parse_dates=["date"])
+            print(f"  {C.GREEN}[OK] nifty: {len(nifty)} rows from cache{C.RESET}")
+        else:
+            raise RuntimeError("No cached nifty data found. Run GitHub Action first.")
+            
+        if os.path.exists(vix_path):
+            vix = pd.read_csv(vix_path, parse_dates=["date"])
+            print(f"  {C.GREEN}[OK] vix: {len(vix)} rows from cache{C.RESET}")
+        else:
+            raise RuntimeError("No cached vix data found. Run GitHub Action first.")
+            
+        if os.path.exists(sp500_path):
+            sp500 = pd.read_csv(sp500_path, parse_dates=["date"])
+            print(f"  {C.GREEN}[OK] sp500: {len(sp500)} rows from cache{C.RESET}")
+        else:
+            raise RuntimeError("No cached sp500 data found. Run GitHub Action first.")
     
     # Rename columns for merging
     vix_cols = vix[["date", "close"]].rename(columns={"close": "vix"})
@@ -270,6 +301,7 @@ def load_all_data(live_sentiment=True):
     df = df.merge(sp_cols, on="date", how="left")
     
     # Fetch and merge sentiment features (PCR, FII/DII)
+    # In cache mode, this just reads the CSVs without any network calls
     df_fii, df_pcr = fetch_sentiment_data(live=live_sentiment)
     
     if df_fii is not None:
