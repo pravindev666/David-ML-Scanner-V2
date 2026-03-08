@@ -17,7 +17,11 @@ from models.ensemble_classifier import EnsembleClassifier
 from models.regime_detector import RegimeDetector
 from models.range_predictor import RangePredictor
 from models.sr_engine import SREngine
-from models.lstm_classifier import LSTMClassifier
+try:
+    from models.lstm_classifier import LSTMClassifier
+    HAS_LSTM = True
+except ImportError:
+    HAS_LSTM = False
 from analyzers.whipsaw_detector import WhipsawDetector
 from analyzers.iron_condor_analyzer import IronCondorAnalyzer
 from analyzers.bounce_analyzer import BounceAnalyzer
@@ -98,11 +102,16 @@ def load_oracle():
         ensemble.train(df, features)
         ensemble.save()
 
-    # Load (or train) LSTM
-    lstm = LSTMClassifier(seq_len=10)
-    if not lstm.load():
-        lstm.train(df, features, verbose=False)
-        lstm.save()
+    # Load (or train) LSTM (optional — requires PyTorch)
+    lstm = None
+    if HAS_LSTM:
+        lstm = LSTMClassifier(seq_len=10)
+        if not lstm.load():
+            try:
+                lstm.train(df, features, verbose=False)
+                lstm.save()
+            except Exception:
+                lstm = None
         
     regime = RegimeDetector()
     if not regime.load():
@@ -192,19 +201,21 @@ if mode == "Dashboard":
     regime_model = oracle["regime_models"].get(current_regime, oracle["ensemble"])
     tree_pred = regime_model.predict_today(df)
     
-    # LSTM Model
-    lstm_pred = oracle["lstm"].predict_today(df)
-    
-    # Hybrid Calculation
-    prob_up = (tree_pred["prob_up"] + lstm_pred["prob_up"]) / 2.0
-    prob_down = (tree_pred["prob_down"] + lstm_pred["prob_down"]) / 2.0
-    prob_sid = (tree_pred["prob_sideways"] + lstm_pred["prob_sideways"]) / 2.0
-    
-    probs = {UP: prob_up, DOWN: prob_down, SIDEWAYS: prob_sid}
-    hybrid_dir = max(probs, key=probs.get)
-    hybrid_conf = probs[hybrid_dir]
-    
-    pred = {"direction": hybrid_dir, "confidence": hybrid_conf}
+    # LSTM Model (optional — may be None if PyTorch not installed)
+    lstm = oracle.get("lstm")
+    if lstm is not None:
+        lstm_pred = lstm.predict_today(df)
+        # Hybrid Calculation
+        prob_up = (tree_pred["prob_up"] + lstm_pred["prob_up"]) / 2.0
+        prob_down = (tree_pred["prob_down"] + lstm_pred["prob_down"]) / 2.0
+        prob_sid = (tree_pred["prob_sideways"] + lstm_pred["prob_sideways"]) / 2.0
+        probs = {UP: prob_up, DOWN: prob_down, SIDEWAYS: prob_sid}
+        hybrid_dir = max(probs, key=probs.get)
+        hybrid_conf = probs[hybrid_dir]
+        pred = {"direction": hybrid_dir, "confidence": hybrid_conf}
+    else:
+        # Fallback: tree-only prediction
+        pred = tree_pred
     
     regime_info = oracle["regime"].get_regime_with_micro_direction(df, tree_pred)
     whipsaw = oracle["whipsaw"].analyze(df)
