@@ -69,7 +69,7 @@ def fetch_symbol(symbol, name, start_year=DATA_START_YEAR):
     import random
     
     df = None
-    max_retries = 30
+    max_retries = 3
     for attempt in range(max_retries):
         try:
             df = yf.download(symbol, start=start_date, auto_adjust=True, progress=False)
@@ -79,7 +79,7 @@ def fetch_symbol(symbol, name, start_year=DATA_START_YEAR):
                 raise ValueError(f"No data returned for {symbol}")
         except Exception as e:
             if attempt < max_retries - 1:
-                sleep_time = random.uniform(2, 5)
+                sleep_time = random.uniform(1, 2)
                 print(f"  {C.YELLOW}[RETRY] Rate limited or failed for {name}. Retrying in {sleep_time:.1f}s ({attempt+1}/{max_retries})...{C.RESET}")
                 time.sleep(sleep_time)
             else:
