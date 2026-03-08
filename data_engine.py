@@ -159,23 +159,42 @@ def fetch_sentiment_data():
     
     try:
         if nse_fiidii is not None:
-            f_data = nse_fiidii()
-            if not f_data.empty:
-                f_date = f_data["date"].iloc[0]
-                dii_net = float(f_data[f_data["category"] == "DII"]["netValue"].iloc[0])
-                fii_net = float(f_data[f_data["category"].str.contains("FII")]["netValue"].iloc[0])
-                
-                new_row = pd.DataFrame([{"date": pd.to_datetime(f_date).strftime("%Y-%m-%d"), "fii_net": fii_net, "dii_net": dii_net}])
-                
-                if df_fii is not None:
-                    # Drop if exists, append new
-                    df_fii = df_fii[df_fii["date"] != new_row["date"].iloc[0]]
-                    df_fii = pd.concat([df_fii, new_row], ignore_index=True)
-                else:
-                    df_fii = new_row
+            import threading
+            
+            result_container = []
+            def fetch_fii_thread():
+                try:
+                    res = nse_fiidii()
+                    result_container.append(res)
+                except Exception:
+                    pass
+            
+            t = threading.Thread(target=fetch_fii_thread)
+            t.daemon = True
+            t.start()
+            t.join(timeout=3.0)
+            
+            if t.is_alive():
+                raise TimeoutError("nse_fiidii() took longer than 3 seconds")
+            
+            if result_container:
+                f_data = result_container[0]
+                if not f_data.empty:
+                    f_date = f_data["date"].iloc[0]
+                    dii_net = float(f_data[f_data["category"] == "DII"]["netValue"].iloc[0])
+                    fii_net = float(f_data[f_data["category"].str.contains("FII")]["netValue"].iloc[0])
                     
-                df_fii.to_csv(fiidii_path, index=False)
-                print(f"  {C.GREEN}[OK] FII/DII updated for {f_date}{C.RESET}")
+                    new_row = pd.DataFrame([{"date": pd.to_datetime(f_date).strftime("%Y-%m-%d"), "fii_net": fii_net, "dii_net": dii_net}])
+                    
+                    if df_fii is not None:
+                        # Drop if exists, append new
+                        df_fii = df_fii[df_fii["date"] != new_row["date"].iloc[0]]
+                        df_fii = pd.concat([df_fii, new_row], ignore_index=True)
+                    else:
+                        df_fii = new_row
+                        
+                    df_fii.to_csv(fiidii_path, index=False)
+                    print(f"  {C.GREEN}[OK] FII/DII updated for {f_date}{C.RESET}")
     except Exception as e:
         print(f"  {C.YELLOW}[WARN] Failed to fetch live FII/DII: {e}{C.RESET}")
 
