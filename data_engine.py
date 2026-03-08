@@ -72,7 +72,7 @@ def fetch_symbol(symbol, name, start_year=DATA_START_YEAR):
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            df = yf.download(symbol, start=start_date, auto_adjust=True, progress=False)
+            df = yf.download(symbol, start=start_date, progress=False)
             if not df.empty:
                 break
             else:
@@ -90,12 +90,15 @@ def fetch_symbol(symbol, name, start_year=DATA_START_YEAR):
         if df is None or df.empty:
             raise ValueError(f"No data returned for {symbol} after {max_retries} attempts.")
         
-        # Flatten multi-level columns if present
+        # Flatten multi-level columns if present (newer yfinance versions)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
+        elif len(df.columns) > 0 and isinstance(df.columns[0], tuple):
+            df.columns = [c[0] for c in df.columns]
         
         df = df.reset_index()
-        df.columns = [c.lower().replace(" ", "_") for c in df.columns]
+        # Clean column names
+        df.columns = [str(c).lower().replace(" ", "_") for c in df.columns]
         
         # Ensure we have the right columns
         required = ["date", "open", "high", "low", "close", "volume"]
