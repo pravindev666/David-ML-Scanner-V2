@@ -152,6 +152,11 @@ current_price = float(df["close"].iloc[-1])
 vix = float(oracle["df_raw"]["vix"].iloc[-1]) if "vix" in oracle["df_raw"].columns else 15.0
 last_date = df["date"].iloc[-1].strftime("%Y-%m-%d")
 
+# Sentiment (computed once, used everywhere)
+pcr_val = float(df["pcr"].iloc[-1]) if "pcr" in df.columns else 1.0
+fii_val = float(df["fii_net"].iloc[-1]) if "fii_net" in df.columns else 0.0
+dii_val = float(df["dii_net"].iloc[-1]) if "dii_net" in df.columns else 0.0
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SIDEBAR
 # ─────────────────────────────────────────────────────────────────────────────
@@ -161,11 +166,6 @@ with st.sidebar:
     st.caption("v2.0 — 1-Day Regime Engine")
     st.markdown(f"**NIFTY**: {current_price:,.2f}")
     st.markdown(f"**VIX**: {vix:.2f}")
-    
-    # PCR and FII/DII in sidebar
-    pcr_val = float(df["pcr"].iloc[-1]) if "pcr" in df.columns else 1.0
-    fii_val = float(df["fii_net"].iloc[-1]) if "fii_net" in df.columns else 0.0
-    dii_val = float(df["dii_net"].iloc[-1]) if "dii_net" in df.columns else 0.0
     st.markdown(f"**PCR**: {pcr_val:.2f}")
     st.markdown(f"**FII Net**: ₹{fii_val:,.0f} Cr")
     st.markdown(f"**DII Net**: ₹{dii_val:,.0f} Cr")
@@ -187,39 +187,47 @@ with st.sidebar:
         st.rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
+# COMPUTE PREDICTIONS (once, reused across sections)
+# ─────────────────────────────────────────────────────────────────────────────
+classify_fn = oracle["classify_regime"]
+latest_row = df.iloc[-1]
+current_regime = classify_fn(latest_row)
+
+# Tree Model prediction
+regime_model = oracle["regime_models"].get(current_regime, oracle["ensemble"])
+tree_pred = regime_model.predict_today(df)
+
+# LSTM prediction (optional — may be None if PyTorch not installed)
+lstm = oracle.get("lstm")
+lstm_pred = None
+if lstm is not None:
+    lstm_pred = lstm.predict_today(df)
+
+# Determine final prediction:
+# If LSTM available → Hybrid (averaged). Otherwise → Trees only.
+if lstm_pred is not None:
+    prob_up = (tree_pred["prob_up"] + lstm_pred["prob_up"]) / 2.0
+    prob_down = (tree_pred["prob_down"] + lstm_pred["prob_down"]) / 2.0
+    prob_sid = (tree_pred["prob_sideways"] + lstm_pred["prob_sideways"]) / 2.0
+    probs = {UP: prob_up, DOWN: prob_down, SIDEWAYS: prob_sid}
+    hybrid_dir = max(probs, key=probs.get)
+    hybrid_conf = probs[hybrid_dir]
+    pred = {"direction": hybrid_dir, "confidence": hybrid_conf}
+    engine_label = "Hybrid (Trees + LSTM)"
+else:
+    pred = tree_pred
+    engine_label = "Trees Only (No LSTM)"
+
+# ─────────────────────────────────────────────────────────────────────────────
 # TAB 1: DASHBOARD
 # ─────────────────────────────────────────────────────────────────────────────
 if mode == "Dashboard":
     st.title("🦅 Prophet Dashboard")
     
-    # 1. Main Predictions — Hybrid approach (Regime-Trees + LSTM)
-    classify_fn = oracle["classify_regime"]
-    latest_row = df.iloc[-1]
-    current_regime = classify_fn(latest_row)
-    
-    # Tree Model
-    regime_model = oracle["regime_models"].get(current_regime, oracle["ensemble"])
-    tree_pred = regime_model.predict_today(df)
-    
-    # LSTM Model (optional — may be None if PyTorch not installed)
-    lstm = oracle.get("lstm")
-    if lstm is not None:
-        lstm_pred = lstm.predict_today(df)
-        # Hybrid Calculation
-        prob_up = (tree_pred["prob_up"] + lstm_pred["prob_up"]) / 2.0
-        prob_down = (tree_pred["prob_down"] + lstm_pred["prob_down"]) / 2.0
-        prob_sid = (tree_pred["prob_sideways"] + lstm_pred["prob_sideways"]) / 2.0
-        probs = {UP: prob_up, DOWN: prob_down, SIDEWAYS: prob_sid}
-        hybrid_dir = max(probs, key=probs.get)
-        hybrid_conf = probs[hybrid_dir]
-        pred = {"direction": hybrid_dir, "confidence": hybrid_conf}
-    else:
-        # Fallback: tree-only prediction
-        pred = tree_pred
-    
     regime_info = oracle["regime"].get_regime_with_micro_direction(df, tree_pred)
     whipsaw = oracle["whipsaw"].analyze(df)
     
+    # ── Row 1: Verdict | Regime | Whipsaw ──
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -255,9 +263,9 @@ if mode == "Dashboard":
         st.markdown(f"<h2 style='text-align:center;'>{r_label}</h2>", unsafe_allow_html=True)
         
         # Probabilities
-        probs = regime_info.get("state_probs", {})
-        if probs:
-            df_probs = pd.DataFrame(list(probs.items()), columns=["State", "Prob"])
+        probs_regime = regime_info.get("state_probs", {})
+        if probs_regime:
+            df_probs = pd.DataFrame(list(probs_regime.items()), columns=["State", "Prob"])
             fig = go.Figure(go.Bar(
                 x=df_probs["Prob"],
                 y=df_probs["State"],
@@ -274,9 +282,9 @@ if mode == "Dashboard":
         prob_chop = whipsaw["whipsaw_prob"]
         
         status = "⚠️ CHOPPY" if is_chop else "✅ TRENDING"
-        color = "orange" if is_chop else "green"
+        color_w = "orange" if is_chop else "green"
         
-        st.markdown(f"<h2 style='color:{color}; text-align:center;'>{status}</h2>", unsafe_allow_html=True)
+        st.markdown(f"<h2 style='color:{color_w}; text-align:center;'>{status}</h2>", unsafe_allow_html=True)
         st.progress(prob_chop / 100)
         st.caption(f"Chop Probability: {prob_chop:.0f}%")
         
@@ -285,9 +293,10 @@ if mode == "Dashboard":
             icon = "🔴" if val["weight"] > 0 else "🟢"
             st.text(f"{icon} {key}: {val['signal']}")
 
-    # 1.5 Intelligence Breakdown (New Section)
+    # ── Row 2: Intelligence Breakdown ──
     st.markdown("---")
     st.markdown("### 🧬 Intelligence Breakdown")
+    st.caption(f"🔧 Engine: **{engine_label}**")
     b_col1, b_col2, b_col3 = st.columns(3)
     
     with b_col1:
@@ -296,61 +305,56 @@ if mode == "Dashboard":
         t_conf = tree_pred["confidence"] * 100
         t_color = "green" if t_dir == UP else "red" if t_dir == DOWN else "orange"
         st.markdown(f"<span style='color:{t_color}; font-size:24px; font-weight:bold;'>{t_dir}</span> ({t_conf:.0f}%)", unsafe_allow_html=True)
-        st.caption("Specialized logic for the current market regime.")
+        st.caption(f"Regime model: {current_regime}")
         
     with b_col2:
         st.markdown("**🧠 LSTM (Sequence)**")
-        if lstm is not None:
-            # Re-calculating for display clarity
-            lstm_p = lstm.predict_today(df) 
-            l_dir = lstm_p["direction"]
-            l_conf = lstm_p["confidence"] * 100
+        if lstm_pred is not None:
+            l_dir = lstm_pred["direction"]
+            l_conf = lstm_pred["confidence"] * 100
             l_color = "green" if l_dir == UP else "red" if l_dir == DOWN else "orange"
             st.markdown(f"<span style='color:{l_color}; font-size:24px; font-weight:bold;'>{l_dir}</span> ({l_conf:.0f}%)", unsafe_allow_html=True)
             st.caption("Pattern recognition over the last 10 days.")
         else:
-            st.markdown("*LSTM Offline (No PyTorch installed)*")
+            st.markdown("⚠️ *LSTM Offline*")
+            st.caption("PyTorch not installed. Using trees only.")
             
     with b_col3:
-        st.markdown("**🦅 Hybrid Verdict**")
+        st.markdown("**🦅 Final Verdict**")
         h_color = "green" if pred["direction"] == UP else "red" if pred["direction"] == DOWN else "orange"
         st.markdown(f"<span style='color:{h_color}; font-size:24px; font-weight:bold;'>{pred['direction']}</span> ({pred['confidence']*100:.0f}%)", unsafe_allow_html=True)
-        st.caption("The final weighted decision for your trade.")
+        if lstm_pred is not None:
+            st.caption("Hybrid average of Trees + LSTM.")
+        else:
+            st.caption("Same as Tree Ensemble (no LSTM).")
 
+    # ── Row 3: Market Sentiment ──
     st.markdown("---")
-    
-    # 1.5 Sentiment Analysis (PCR & FII/DII)
     st.subheader("📊 Market Sentiment")
     sent_c1, sent_c2, sent_c3 = st.columns(3)
     
-    # Safely get sentiment metrics
-    current_pcr = float(df["pcr"].iloc[-1]) if "pcr" in df.columns else 1.0
-    fii_net = float(df["fii_net"].iloc[-1]) if "fii_net" in df.columns else 0.0
-    dii_net = float(df["dii_net"].iloc[-1]) if "dii_net" in df.columns else 0.0
-    
     with sent_c1:
-        pcr_color = "green" if current_pcr < 0.8 else "red" if current_pcr > 1.2 else "orange"
-        st.markdown(f"<div class='metric-card'><h4>Put-Call Ratio</h4><h2 style='color:{pcr_color};'>{current_pcr:.2f}</h2>", unsafe_allow_html=True)
-        if current_pcr < 0.8:
+        pcr_color = "green" if pcr_val < 0.8 else "red" if pcr_val > 1.2 else "orange"
+        st.markdown(f"<div class='metric-card'><h4>Put-Call Ratio</h4><h2 style='color:{pcr_color};'>{pcr_val:.2f}</h2>", unsafe_allow_html=True)
+        if pcr_val < 0.8:
             st.caption("Oversold / Bullish Support")
-        elif current_pcr > 1.2:
+        elif pcr_val > 1.2:
             st.caption("Overbought / Bearish Resistance")
         else:
             st.caption("Neutral Sentiment")
         st.markdown("</div>", unsafe_allow_html=True)
         
     with sent_c2:
-        fii_color = "green" if fii_net > 0 else "red"
-        st.markdown(f"<div class='metric-card'><h4>FII Net Flow (₹ Cr)</h4><h2 style='color:{fii_color};'>{fii_net:,.0f}</h2></div>", unsafe_allow_html=True)
+        fii_color = "green" if fii_val > 0 else "red"
+        st.markdown(f"<div class='metric-card'><h4>FII Net Flow (₹ Cr)</h4><h2 style='color:{fii_color};'>{fii_val:,.0f}</h2></div>", unsafe_allow_html=True)
         
     with sent_c3:
-        dii_color = "green" if dii_net > 0 else "red"
-        st.markdown(f"<div class='metric-card'><h4>DII Net Flow (₹ Cr)</h4><h2 style='color:{dii_color};'>{dii_net:,.0f}</h2></div>", unsafe_allow_html=True)
+        dii_color = "green" if dii_val > 0 else "red"
+        st.markdown(f"<div class='metric-card'><h4>DII Net Flow (₹ Cr)</h4><h2 style='color:{dii_color};'>{dii_val:,.0f}</h2></div>", unsafe_allow_html=True)
 
+    # ── Row 4: Support & Resistance ──
     st.markdown("---")
-    
-    # 2. Support & Resistance
-    st.subheader("🔴 Support & Resistance")
+    st.subheader("📍 Support & Resistance")
     supports, resistances = oracle["sr"].find_levels(oracle["df_raw"])
     
     sr_col1, sr_col2 = st.columns(2)
@@ -438,7 +442,6 @@ elif mode == "Forecast & Ranges":
         if 30 in ranges:
             r = ranges[30]
             st.success(f"30-Day Target Range (80% Conf): **{r['p10']:,.0f} — {r['p90']:,.0f}**")
-            # Similar plot could be added here
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TAB 3: STRATEGY LAB
@@ -446,8 +449,12 @@ elif mode == "Forecast & Ranges":
 elif mode == "Strategy Lab":
     st.title("🧪 Strategy Lab")
     
+    # Dynamic defaults based on current price
+    default_strike = int(round(current_price / 100) * 100) + 200
+    default_target = int(round(current_price / 100) * 100) - 500
+    
     st.subheader("🛡️ Iron Condor Analyzer")
-    strike = st.number_input("Enter Strike Price to Test:", value=26000, step=100)
+    strike = st.number_input("Enter Strike Price to Test:", value=default_strike, step=100)
     days = st.slider("Timeframe (Days)", 1, 30, 5)
     
     if st.button("Analyze Strike"):
@@ -469,7 +476,7 @@ elif mode == "Strategy Lab":
     st.markdown("---")
     
     st.subheader("🔄 Bounce-Back Calculator")
-    target = st.number_input("Enter Target Price (Dip/Rally):", value=25000, step=100)
+    target = st.number_input("Enter Target Price (Dip/Rally):", value=default_target, step=100)
     
     if st.button("Check Bounce Probability"):
         res = oracle["bounce"].analyze(oracle["df_raw"], target)
