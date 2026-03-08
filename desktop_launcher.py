@@ -212,6 +212,7 @@ class MetricCard(QFrame):
                 border: 1px solid {DARK_BORDER};
                 border-radius: 10px;
                 padding: 12px;
+                min-height: 60px;
             }}
         """)
         
@@ -264,7 +265,7 @@ class DavidOracleWindow(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("🦅 David Oracle v2.0 — Desktop")
+        self.setWindowTitle("🦅 David Oracle v2.1 — Desktop")
         self.setMinimumSize(1200, 800)
         self.resize(1400, 900)
         
@@ -477,8 +478,8 @@ class DavidOracleWindow(QMainWindow):
         
         content = QWidget()
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(12, 12, 16, 12)
-        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(25)
         
         # Title
         title = QLabel("🦅 Prophet Dashboard")
@@ -559,13 +560,13 @@ class DavidOracleWindow(QMainWindow):
         row4.addWidget(sup_group)
         layout.addLayout(row4)
         
-        layout.addStretch()
-        
         # Placeholder message
         self.dashboard_placeholder = QLabel("Press 🔴 Fetch Spot + Predict (F5) to see the full dashboard")
-        self.dashboard_placeholder.setStyleSheet(f"color: {TEXT_DIM}; font-size: 14px;")
+        self.dashboard_placeholder.setStyleSheet(f"color: {TEXT_DIM}; font-size: 16px; margin-top: 20px;")
         self.dashboard_placeholder.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.dashboard_placeholder)
+        
+        layout.addStretch()
         
         scroll.setWidget(content)
         main_layout.addWidget(scroll)
@@ -900,7 +901,159 @@ class DavidOracleWindow(QMainWindow):
         return tab
     
     # ─────────────────────────────────────────────────────────────────────────
-    # TAB 5: DAVID CODEX — A-to-Z Trading Guide
+    # TAB 5: INTRADAY ANALYSIS (15-Min ML)
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    def _build_intraday_tab(self):
+        tab = QWidget()
+        main_layout = QVBoxLayout(tab)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; }")
+        
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(25)
+        
+        # ── Header ──
+        header = QLabel("⚡ 15-Minute ML Intraday Classifier")
+        header.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 24px; font-weight: bold; margin-bottom: 5px;")
+        layout.addWidget(header)
+        
+        desc = QLabel("Trained on 67,000+ rows of 15-min candle data using XGBoost. Predicts next 1-4 hour direction based on RSI, VWAP setup, MACD, and VIX structure. Use this for <b>entry timing</b>.")
+        desc.setStyleSheet(f"color: {TEXT_SEC}; font-size: 14px;")
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+        
+        # ── 1. Verdict Box ──
+        verdict_group = QGroupBox("🤖 ML Intraday Verdict")
+        verdict_group.setStyleSheet(f"""
+            QGroupBox {{ border: 1px solid {DARK_BORDER}; border-radius: 8px; margin-top: 15px; font-weight: bold; color: {TEXT_PRIMARY}; }}
+            QGroupBox::title {{ subcontrol-origin: margin; left: 15px; padding: 0 5px; }}
+        """)
+        v_layout = QVBoxLayout(verdict_group)
+        v_layout.setContentsMargins(20, 30, 20, 20)
+        
+        self.lbl_intraday_dir = QLabel("—")
+        self.lbl_intraday_dir.setAlignment(Qt.AlignCenter)
+        self.lbl_intraday_dir.setStyleSheet(f"color: {TEXT_DIM}; font-size: 36px; font-weight: bold;")
+        v_layout.addWidget(self.lbl_intraday_dir)
+        
+        self.lbl_intraday_timing = QLabel("Click Fetch Spot + Predict to analyze 15m data.")
+        self.lbl_intraday_timing.setAlignment(Qt.AlignCenter)
+        self.lbl_intraday_timing.setStyleSheet(f"color: {TEXT_SEC}; font-size: 16px; margin-top: 10px;")
+        v_layout.addWidget(self.lbl_intraday_timing)
+        
+        layout.addWidget(verdict_group)
+        
+        # ── 2. Probabilities ──
+        prob_group = QGroupBox("📊 15-Min Class Probabilities")
+        prob_group.setStyleSheet(f"""
+            QGroupBox {{ border: 1px solid {DARK_BORDER}; border-radius: 8px; margin-top: 15px; font-weight: bold; color: {TEXT_PRIMARY}; }}
+            QGroupBox::title {{ subcontrol-origin: margin; left: 15px; padding: 0 5px; }}
+        """)
+        p_layout = QHBoxLayout(prob_group)
+        p_layout.setContentsMargins(20, 30, 20, 20)
+        p_layout.setSpacing(15)
+        
+        self.card_intra_up = MetricCard("UP PROB", "—", ACCENT_GREEN)
+        self.card_intra_chop = MetricCard("SIDEWAYS", "—", ACCENT_GOLD)
+        self.card_intra_down = MetricCard("DOWN PROB", "—", ACCENT_RED)
+        
+        p_layout.addWidget(self.card_intra_up, 1)
+        p_layout.addWidget(self.card_intra_chop, 1)
+        p_layout.addWidget(self.card_intra_down, 1)
+        layout.addWidget(prob_group)
+        
+        # ── 3. Engineered Features ──
+        feat_group = QGroupBox("🧬 Current 15m Technical State")
+        feat_group.setStyleSheet(f"""
+            QGroupBox {{ border: 1px solid {DARK_BORDER}; border-radius: 8px; margin-top: 15px; font-weight: bold; color: {TEXT_PRIMARY}; }}
+            QGroupBox::title {{ subcontrol-origin: margin; left: 15px; padding: 0 5px; }}
+        """)
+        f_layout = QGridLayout(feat_group)
+        f_layout.setContentsMargins(20, 30, 20, 20)
+        f_layout.setVerticalSpacing(15)
+        f_layout.setHorizontalSpacing(15)
+        
+        self.card_feat_rsi = MetricCard("RSI-14 (15m)", "—")
+        self.card_feat_vwap = MetricCard("VWAP Dev", "—")
+        self.card_feat_volz = MetricCard("Vol Z-Score", "—")
+        self.card_feat_atr = MetricCard("ATR %", "—")
+        
+        f_layout.addWidget(self.card_feat_rsi, 0, 0)
+        f_layout.addWidget(self.card_feat_vwap, 0, 1)
+        f_layout.addWidget(self.card_feat_volz, 1, 0)
+        f_layout.addWidget(self.card_feat_atr, 1, 1)
+        layout.addWidget(feat_group)
+        
+        # ── Refresh Button ──
+        self.btn_refresh_intraday = QPushButton("🔄  Refresh Intraday Analysis")
+        self.btn_refresh_intraday.clicked.connect(self._fetch_intraday_only)
+        layout.addWidget(self.btn_refresh_intraday)
+        
+        layout.addStretch()
+        scroll.setWidget(content)
+        main_layout.addWidget(scroll)
+        return tab
+
+    def _fetch_intraday_only(self):
+        self.append_log("\n" + "═" * 50)
+        self._start_worker(
+            backend.predict_intraday_now,
+            self._on_intraday_done,
+            "⚡ Running Intraday ML Model..."
+        )
+
+    def _on_intraday_done(self, result):
+        if result.get("error"):
+            self.statusBar().showMessage(f"❌ Intraday Error: {result['error']}")
+            return
+            
+        direction = result.get("direction", "UNKNOWN")
+        conf = result.get("confidence", 0) * 100
+        
+        colors = {"UP": ACCENT_GREEN, "DOWN": ACCENT_RED, "SIDEWAYS": ACCENT_GOLD}
+        color = colors.get(direction, TEXT_DIM)
+        
+        self.lbl_intraday_dir.setText(f"{direction} ({conf:.1f}%)")
+        self.lbl_intraday_dir.setStyleSheet(f"color: {color}; font-size: 36px; font-weight: bold;")
+        
+        timing = result.get("entry_timing", "")
+        self.lbl_intraday_timing.setText(timing)
+        if "WAIT" in timing or "CAUTION" in timing:
+            self.lbl_intraday_timing.setStyleSheet(f"color: {ACCENT_RED}; font-size: 16px; margin-top: 10px; font-weight: bold;")
+        elif "GOOD" in timing:
+            self.lbl_intraday_timing.setStyleSheet(f"color: {ACCENT_GREEN}; font-size: 16px; margin-top: 10px; font-weight: bold;")
+        else:
+            self.lbl_intraday_timing.setStyleSheet(f"color: {TEXT_SEC}; font-size: 16px; margin-top: 10px;")
+            
+        probs = result.get("probabilities", {})
+        self.card_intra_up.set_value(f"{probs.get('UP', 0):.1f}%")
+        self.card_intra_chop.set_value(f"{probs.get('SIDEWAYS', 0):.1f}%")
+        self.card_intra_down.set_value(f"{probs.get('DOWN', 0):.1f}%")
+        
+        feats = result.get("raw_features", {})
+        
+        rsi = feats.get("rsi_14", 50)
+        rsi_col = ACCENT_RED if rsi > 70 or rsi < 30 else ACCENT_GREEN
+        self.card_feat_rsi.set_value(f"{rsi:.1f}", rsi_col)
+        
+        vwap = feats.get("vwap_dev", 0)
+        self.card_feat_vwap.set_value(f"{vwap:+.2f}%", ACCENT_GREEN if vwap > 0 else ACCENT_RED)
+        
+        volz = feats.get("volume_zscore", 0)
+        self.card_feat_volz.set_value(f"{volz:+.1f}", ACCENT_CYAN if volz > 2 else TEXT_PRIMARY)
+        
+        self.card_feat_atr.set_value(f"{feats.get('atr_pct', 0):.2f}%")
+        
+        self.statusBar().showMessage("✅ Intraday ML analysis complete!")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TAB 6: DAVID CODEX — A-to-Z Trading Guide
     # ─────────────────────────────────────────────────────────────────────────
     
     def _build_codex_tab(self):
@@ -1234,6 +1387,7 @@ class DavidOracleWindow(QMainWindow):
             self._update_dashboard(result)
             self._update_forecast(result)
             self._update_position_manager(result)
+            self._fetch_intraday_only()  # Auto-fetch intraday data on global refresh
             self.statusBar().showMessage("✅ Prediction complete!")
             self.dashboard_placeholder.setVisible(False)
         else:
@@ -1376,7 +1530,7 @@ class DavidOracleWindow(QMainWindow):
             
             # ─── HOLD/EXIT SIGNAL ───
             try:
-                signal = backend.get_hold_exit_signal(entry_dir, entry_price, entry_date)
+                signal = backend.get_hold_exit_signal(entry_dir, entry_price, entry_date, prediction=pred)
                 
                 sig = signal.get("signal", "HOLD")
                 sig_colors = {"HOLD": ACCENT_GREEN, "HEDGE": ACCENT_GOLD, "EXIT": ACCENT_RED}

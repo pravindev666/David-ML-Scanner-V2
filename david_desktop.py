@@ -536,7 +536,7 @@ def sync_15m_data():
 # 8. HOLD / EXIT SIGNAL — The Backbone
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def get_hold_exit_signal(entry_direction, entry_price, entry_date):
+def get_hold_exit_signal(entry_direction, entry_price, entry_date, prediction=None):
     """
     Compare the current prediction against the user's open position.
     Returns HOLD / HEDGE / EXIT with reasoning.
@@ -545,6 +545,7 @@ def get_hold_exit_signal(entry_direction, entry_price, entry_date):
         entry_direction: "UP", "DOWN", or "SIDEWAYS"
         entry_price: float, NIFTY level at entry
         entry_date: str, "YYYY-MM-DD"
+        prediction: dict, existing prediction result (avoids re-running predict_now)
     
     Returns:
         dict with: signal, confidence, message, recovery_prob, days_held
@@ -560,9 +561,11 @@ def get_hold_exit_signal(entry_direction, entry_price, entry_date):
     }
     
     try:
-        # Get latest prediction
-        pred = predict_now()
-        if not pred["success"]:
+        # Use provided prediction or run fresh
+        pred = prediction
+        if pred is None or not pred.get("success"):
+            pred = predict_now()
+        if not pred.get("success"):
             result["signal"] = "HOLD"
             result["message"] = "Cannot fetch prediction. Hold current position."
             return result
@@ -804,6 +807,17 @@ def get_intraday_regime():
     from analyzers.regime_15m import Regime15mDetector
     detector = Regime15mDetector()
     return detector.analyze()
+
+
+def predict_intraday_now():
+    """
+    Get prediction from the Intraday XGBoost classifier trained on 15m data.
+    """
+    from models.intraday_classifier import IntradayClassifier
+    model = IntradayClassifier()
+    if not model.load():
+        return {"error": "Intraday model not trained yet. Click Train Models."}
+    return model.predict_now()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
