@@ -450,9 +450,17 @@ class DavidOracleWindow(QMainWindow):
     
     def _build_dashboard_tab(self):
         tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
+        main_layout = QVBoxLayout(tab)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(f"QScrollArea {{ border: none; background-color: {DARK_BG}; }}")
+        
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(12, 12, 16, 12)
+        layout.setSpacing(12)
         
         # Title
         title = QLabel("🦅 Prophet Dashboard")
@@ -473,15 +481,13 @@ class DavidOracleWindow(QMainWindow):
         row1.addWidget(self.card_confidence)
         layout.addLayout(row1)
         
-        # Row 2: Tree | LSTM | Ensemble predictions
+        # Row 2: Tree | Ensemble predictions
         row2 = QHBoxLayout()
         
         self.card_tree = MetricCard("🌳 TREE MODEL", "—", TEXT_PRIMARY)
-        self.card_lstm = MetricCard("🧠 LSTM", "—", TEXT_PRIMARY)
         self.card_ensemble = MetricCard("📊 ENSEMBLE", "—", TEXT_PRIMARY)
         
         row2.addWidget(self.card_tree)
-        row2.addWidget(self.card_lstm)
         row2.addWidget(self.card_ensemble)
         layout.addLayout(row2)
         
@@ -542,6 +548,9 @@ class DavidOracleWindow(QMainWindow):
         self.dashboard_placeholder.setStyleSheet(f"color: {TEXT_DIM}; font-size: 14px;")
         self.dashboard_placeholder.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.dashboard_placeholder)
+        
+        scroll.setWidget(content)
+        main_layout.addWidget(scroll)
         
         return tab
     
@@ -1119,22 +1128,12 @@ class DavidOracleWindow(QMainWindow):
             color = ACCENT_GOLD if is_choppy else ACCENT_GREEN
             self.card_whipsaw.set_value(status, color)
         
-        # Tree / LSTM / Ensemble
         if pred.get("tree_prediction"):
             tp = pred["tree_prediction"]
             self.card_tree.set_value(
                 f"{tp['direction']} ({tp['confidence']*100:.0f}%)",
                 ACCENT_GREEN if "UP" in str(tp['direction']).upper() else ACCENT_RED
             )
-        
-        if pred.get("lstm_prediction"):
-            lp = pred["lstm_prediction"]
-            self.card_lstm.set_value(
-                f"{lp['direction']} ({lp['confidence']*100:.0f}%)",
-                ACCENT_GREEN if "UP" in str(lp['direction']).upper() else ACCENT_RED
-            )
-        else:
-            self.card_lstm.set_value("N/A", TEXT_DIM)
         
         if pred.get("ensemble_prediction"):
             ep = pred["ensemble_prediction"]

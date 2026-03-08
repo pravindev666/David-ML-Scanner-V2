@@ -126,20 +126,7 @@ def sync_all_data():
         log("📊 Syncing all market data...")
         log("═" * 50)
         
-        log("☁️  Checking for updates from Cloud (GitHub)...")
-        import subprocess
-        try:
-            # First try pulling the latest pre-fetched CSVs from the GitHub repository 
-            # (which are generated every 15 mins by GitHub Actions)
-            # Use strict host key checking = no to prevent ssh prompts if ssh is used
-            subprocess.run(["git", "-c", "core.sshCommand=ssh -o StrictHostKeyChecking=no", "pull", "origin", "main"], 
-                           check=True, capture_output=True, text=True)
-            log("  ✅ Successfully pulled latest pre-fetched CSVs from GitHub.")
-        except Exception as e:
-            log("  ⚠️ Git pull skipped (offline, no updates, or not a git repo).")
-            log(f"  Debug: {e}")
-
-        log("\nStarting local data engine fallback sync...")
+        log("\nStarting local data engine sync...")
         from data_engine import load_all_data
         df = load_all_data(live_sentiment=True)
         
@@ -185,7 +172,6 @@ def train_all_models():
         from models.ensemble_classifier import EnsembleClassifier
         from models.regime_detector import RegimeDetector
         from models.range_predictor import RangePredictor
-        # NOTE: LSTMClassifier import deferred to avoid torch DLL crash
         import joblib
         
         # Load data
@@ -243,23 +229,9 @@ def train_all_models():
         joblib.dump(regime_models, regime_models_path)
         result["models_trained"].append("regime_models")
         log("  ✅ Regime models saved")
-        
-        # Try LSTM (optional, may fail on some systems due to torch DLL issues)
-        try:
-            log("\n[Bonus] Training LSTM Sequence Model...")
-            from models.lstm_classifier import LSTMClassifier
-            lstm = LSTMClassifier()
-            lstm.train(df, features)
-            lstm.save()
-            result["models_trained"].append("lstm_classifier")
-            log("  ✅ LSTM saved")
-        except Exception as e:
-            log(f"  ⚠️ LSTM skipped (torch issue): {e}")
-            log("  ℹ️ This is normal — core models still work perfectly.")
-        
         result["success"] = True
         log(f"\n{'═' * 50}")
-        log(f"✅ ALL MODELS TRAINED! ({len(result['models_trained'])} models)")
+        log(f"✅ ALL CORE MODELS TRAINED! ({len(result['models_trained'])} models)")
         
     except Exception as e:
         result["error"] = str(e)
@@ -291,7 +263,6 @@ def predict_now(spot_price=None, vix_value=None):
         "spot_price": spot_price,
         "vix_value": vix_value,
         "tree_prediction": None,
-        "lstm_prediction": None,
         "ensemble_prediction": None,
         "regime": None,
         "regime_info": None,
@@ -316,7 +287,6 @@ def predict_now(spot_price=None, vix_value=None):
         from models.ensemble_classifier import EnsembleClassifier
         from models.regime_detector import RegimeDetector
         from models.range_predictor import RangePredictor
-        # NOTE: LSTMClassifier import deferred to try/except below
         from models.sr_engine import SREngine
         from analyzers.whipsaw_detector import WhipsawDetector
         from analyzers.iron_condor_analyzer import IronCondorAnalyzer
@@ -382,17 +352,6 @@ def predict_now(spot_price=None, vix_value=None):
         except Exception:
             log("    ⚠️ Regime models not found")
         
-        # LSTM (may fail on systems with broken torch)
-        lstm = None
-        try:
-            from models.lstm_classifier import LSTMClassifier
-            lstm = LSTMClassifier()
-            lstm.load()
-            log("    ✅ LSTM loaded")
-        except Exception:
-            log("    ⚠️ LSTM not available (torch issue, skipping)")
-            lstm = None
-        
         # Regime detector
         regime_detector = RegimeDetector()
         try:
@@ -422,18 +381,9 @@ def predict_now(spot_price=None, vix_value=None):
             result["tree_prediction"] = tree_pred
             log(f"    🌳 Tree: {tree_pred['direction']} ({tree_pred['confidence']*100:.0f}%)")
         
-        # LSTM prediction
-        if lstm:
-            try:
-                lstm_pred = lstm.predict_today(df, features)
-                result["lstm_prediction"] = lstm_pred
-                log(f"    🧠 LSTM: {lstm_pred['direction']} ({lstm_pred['confidence']*100:.0f}%)")
-            except Exception:
-                log("    ⚠️ LSTM prediction failed")
-        
-        # Ensemble verdict (combine tree + LSTM)
+        # Ensemble verdict (primary is tree/ensemble wrapper)
         if result["tree_prediction"]:
-            result["ensemble_prediction"] = result["tree_prediction"]  # Primary
+            result["ensemble_prediction"] = result["tree_prediction"]
         
         # Regime info
         try:
@@ -534,7 +484,6 @@ def get_data_status():
         "regime_models": "regime_models.pkl",
         "regime_detector": "regime_detector.pkl",
         "range_predictor": "range_predictor.pkl",
-        "lstm": "lstm_classifier.pkl",
     }
     
     model_status = []
