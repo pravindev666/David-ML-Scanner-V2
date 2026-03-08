@@ -83,9 +83,18 @@ def load_oracle():
     from utils import MODEL_DIR
     regime_models_path = os.path.join(MODEL_DIR, "regime_models.pkl")
     
+    regime_models = None
     if os.path.exists(regime_models_path):
-        regime_models = joblib.load(regime_models_path)
-    else:
+        try:
+            regime_models = joblib.load(regime_models_path)
+            # Basic validation: check if it's the expected dict
+            if not isinstance(regime_models, dict) or "CHOPPY" not in regime_models:
+                regime_models = None
+        except Exception as e:
+            st.warning(f"Note: Saved regime models are incompatible with this environment. Re-training... ({e})")
+            regime_models = None
+
+    if regime_models is None:
         # Fallback: train from scratch (slow, first run only)
         regime_models = {}
         for regime in ["TRENDING", "CHOPPY", "VOLATILE"]:
@@ -98,7 +107,11 @@ def load_oracle():
     
     # Load (or train) main ensemble
     ensemble = EnsembleClassifier()
-    if not ensemble.load():
+    try:
+        if not ensemble.load():
+            ensemble.train(df, features)
+            ensemble.save()
+    except Exception:
         ensemble.train(df, features)
         ensemble.save()
 
@@ -106,7 +119,11 @@ def load_oracle():
     lstm = None
     if HAS_LSTM:
         lstm = LSTMClassifier(seq_len=10)
-        if not lstm.load():
+        try:
+            if not lstm.load():
+                lstm.train(df, features, verbose=False)
+                lstm.save()
+        except Exception:
             try:
                 lstm.train(df, features, verbose=False)
                 lstm.save()
@@ -114,12 +131,20 @@ def load_oracle():
                 lstm = None
         
     regime = RegimeDetector()
-    if not regime.load():
+    try:
+        if not regime.load():
+            regime.train(df)
+            regime.save()
+    except Exception:
         regime.train(df)
         regime.save()
         
     range_pred = RangePredictor()
-    if not range_pred.load():
+    try:
+        if not range_pred.load():
+            range_pred.train(df, features)
+            range_pred.save()
+    except Exception:
         range_pred.train(df, features)
         range_pred.save()
         
