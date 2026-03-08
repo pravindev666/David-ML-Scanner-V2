@@ -45,7 +45,7 @@ os.makedirs(MODEL_DIR, exist_ok=True)
 NIFTY_SYMBOL = "^NSEI"
 VIX_SYMBOL = "^INDIAVIX"
 SP500_SYMBOL = "^GSPC"
-DATA_START_YEAR = 2015
+DATA_START_YEAR = 2011
 LOT_SIZE = 75  # Nifty lot size (adjust as NSE updates)
 
 # Direction labels
