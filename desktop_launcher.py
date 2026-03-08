@@ -1204,8 +1204,39 @@ class DavidOracleWindow(QMainWindow):
 </table>
 """)
 
-        # ── CHAPTER 5: Risk Management ──
-        add_section("🛡️ Chapter 5: Risk Management & Capital Allocation", f"""
+        # ── CHAPTER 5: Intraday ML & Entry Timing ──
+        add_section("⚡ Chapter 5: Intraday ML & Entry Timing", f"""
+<p>The <b style='color:{ACCENT_CYAN}'>15-Minute Intraday ML</b> tab uses a specialized XGBoost model trained on 67,000+ bars of historical intraday data. Use it to time your entries.</p>
+
+<table style='color:{TEXT_PRIMARY}; width:100%;'>
+<tr style='color:{ACCENT_CYAN}'><td><b>Signal</b></td><td><b>Meaning</b></td><td><b>Action</b></td></tr>
+<tr><td style='color:{ACCENT_GREEN}'>✅ GOOD</td><td>Optimal entry window (usually 2:30 PM - 3:30 PM)</td><td>Enter your spread/condor</td></tr>
+<tr><td style='color:{ACCENT_RED}'>⚠️ WAIT</td><td>Market is overheated (e.g., Morning gap-up with RSI > 70)</td><td>Do not enter yet. Wait for mean reversion.</td></tr>
+<tr><td style='color:{ACCENT_GOLD}'>⚠️ CAUTION</td><td>VIX is elevated or conditions are unstable</td><td>Wait for stability before entering</td></tr>
+</table>
+<p style='color:{TEXT_DIM}'><i>Rule of Thumb: The Daily Verdict tells you WHAT to trade. The Intraday ML tells you WHEN to enter.</i></p>
+""")
+
+        # ── CHAPTER 6: Position Manager ──
+        add_section("🛡️ Chapter 6: Position Manager (Hold/Exit Engine)", f"""
+<p>The <b style='color:{ACCENT_CYAN}'>Position Manager</b> is your trading backbone. It tracks your open trades and tells you when to hold or cut.</p>
+
+<ol style='color:{TEXT_PRIMARY}'>
+<li><b>Log your trade:</b> Enter the direction, price, and expiry in the Position Manager tab.</li>
+<li><b>Click Fetch Spot:</b> David compares your position against the latest ML predictions.</li>
+</ol>
+
+<table style='color:{TEXT_PRIMARY}; width:100%;'>
+<tr><td style='color:{ACCENT_GREEN}'>HOLD</td><td>The primary ML model still agrees with your direction. Stay in the trade.</td></tr>
+<tr><td style='color:{ACCENT_GOLD}'>HEDGE</td><td>Conviction has dropped or regime changed. Consider taking partial profits.</td></tr>
+<tr><td style='color:{ACCENT_RED}'>EXIT</td><td>The ML model now strongly disagrees with your position. Cut losses.</td></tr>
+</table>
+
+<p><b>Recovery Probability:</b> If your trade is in a drawdown, David will scan history for similar market drops and tell you the probability of NIFTY recovering back to your entry level.</p>
+""")
+
+        # ── CHAPTER 7: Risk Management ──
+        add_section("💰 Chapter 7: Risk Management & Capital Allocation", f"""
 <table style='color:{TEXT_PRIMARY}; width:100%;'>
 <tr style='color:{ACCENT_CYAN}'><td><b>Capital</b></td><td><b>Per Trade</b></td><td><b>Max Open</b></td></tr>
 <tr><td>₹1 Lakh</td><td>1 lot (₹5,000-7,000 margin)</td><td>2 positions</td></tr>
@@ -1219,8 +1250,8 @@ class DavidOracleWindow(QMainWindow):
 <p style='color:{TEXT_PRIMARY}'>For Iron Condors: Your max loss per side = spread width – premium collected.</p>
 """)
 
-        # ── CHAPTER 6: Exit Rules ──
-        add_section("⏱️ Chapter 6: When to Exit — The Exit Playbook", f"""
+        # ── CHAPTER 8: Exit Rules ──
+        add_section("⏱️ Chapter 8: When to Exit — The Exit Playbook", f"""
 <p><b style='color:{ACCENT_GREEN}'>EXIT WITH PROFIT:</b></p>
 <ol style='color:{TEXT_PRIMARY}'>
 <li>Target hit (60-70% of max) → <b>Exit immediately. Don't wait for more.</b></li>
@@ -1243,8 +1274,8 @@ class DavidOracleWindow(QMainWindow):
 </table>
 """)
 
-        # ── CHAPTER 7: When NOT to Trade ──
-        add_section("🚫 Chapter 7: When NOT to Trade — Red Light Days", f"""
+        # ── CHAPTER 9: When NOT to Trade ──
+        add_section("🚫 Chapter 9: When NOT to Trade — Red Light Days", f"""
 <table style='color:{TEXT_PRIMARY}; width:100%;'>
 <tr style='color:{ACCENT_RED}'><td><b>Scenario</b></td><td><b>Why</b></td><td><b>Action</b></td></tr>
 <tr><td>Confidence &lt;40%</td><td>David doesn't know</td><td style='color:{ACCENT_RED}'>Sit on hands</td></tr>

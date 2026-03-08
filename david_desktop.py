@@ -443,6 +443,8 @@ def get_data_status():
         "sp500": "sp500_daily.csv",
         "pcr": "pcr_daily.csv",
         "fii_dii": "fii_dii_daily.csv",
+        "nifty_15m": "nifty_15m_2001_to_now.csv",
+        "vix_15m": "INDIAVIX_15minute_2001_now.csv",
     }
     
     status = []
