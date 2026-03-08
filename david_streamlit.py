@@ -67,7 +67,7 @@ st.markdown("""
 @st.cache_resource
 def load_oracle():
     """Load data and models once."""
-    df_raw = load_all_data()
+    df_raw = load_all_data(live_sentiment=False)
     df, features = engineer_features(df_raw)
     
     # Regime classification function

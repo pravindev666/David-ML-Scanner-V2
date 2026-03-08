@@ -142,13 +142,16 @@ def fetch_symbol(symbol, name, start_year=DATA_START_YEAR):
         raise RuntimeError(f"Cannot load data for {name}. No cache, no fallback.")
 
 
-def fetch_sentiment_data():
+def fetch_sentiment_data(live=True):
     """
     Fetch the latest PCR and FII/DII data.
-    If fetching fails, it simply falls back to last known value or uses generated history.
+    If fetching fails (or live=False), it simply falls back to the generated history CSV.
     """
-    print(f"  {C.CYAN}[FETCH] Sentiment: FII/DII and PCR{C.RESET}")
-    
+    if live:
+        print(f"  {C.CYAN}[FETCH] Sentiment: FII/DII and PCR{C.RESET}")
+    else:
+        print(f"  {C.CYAN}[CACHE] Using saved Github Action data for Sentiment{C.RESET}")
+        
     # 1. FII / DII
     fiidii_path = _csv_path("fii_dii")
     df_fii = None
@@ -157,46 +160,47 @@ def fetch_sentiment_data():
     
     today_str = datetime.now().strftime("%d-%b-%Y")
     
-    try:
-        if nse_fiidii is not None:
-            import threading
-            
-            result_container = []
-            def fetch_fii_thread():
-                try:
-                    res = nse_fiidii()
-                    result_container.append(res)
-                except Exception:
-                    pass
-            
-            t = threading.Thread(target=fetch_fii_thread)
-            t.daemon = True
-            t.start()
-            t.join(timeout=3.0)
-            
-            if t.is_alive():
-                raise TimeoutError("nse_fiidii() took longer than 3 seconds")
-            
-            if result_container:
-                f_data = result_container[0]
-                if not f_data.empty:
-                    f_date = f_data["date"].iloc[0]
-                    dii_net = float(f_data[f_data["category"] == "DII"]["netValue"].iloc[0])
-                    fii_net = float(f_data[f_data["category"].str.contains("FII")]["netValue"].iloc[0])
-                    
-                    new_row = pd.DataFrame([{"date": pd.to_datetime(f_date).strftime("%Y-%m-%d"), "fii_net": fii_net, "dii_net": dii_net}])
-                    
-                    if df_fii is not None:
-                        # Drop if exists, append new
-                        df_fii = df_fii[df_fii["date"] != new_row["date"].iloc[0]]
-                        df_fii = pd.concat([df_fii, new_row], ignore_index=True)
-                    else:
-                        df_fii = new_row
+    if live:
+        try:
+            if nse_fiidii is not None:
+                import threading
+                
+                result_container = []
+                def fetch_fii_thread():
+                    try:
+                        res = nse_fiidii()
+                        result_container.append(res)
+                    except Exception:
+                        pass
+                
+                t = threading.Thread(target=fetch_fii_thread)
+                t.daemon = True
+                t.start()
+                t.join(timeout=3.0)
+                
+                if t.is_alive():
+                    raise TimeoutError("nse_fiidii() took longer than 3 seconds")
+                
+                if result_container:
+                    f_data = result_container[0]
+                    if not f_data.empty:
+                        f_date = f_data["date"].iloc[0]
+                        dii_net = float(f_data[f_data["category"] == "DII"]["netValue"].iloc[0])
+                        fii_net = float(f_data[f_data["category"].str.contains("FII")]["netValue"].iloc[0])
                         
-                    df_fii.to_csv(fiidii_path, index=False)
-                    print(f"  {C.GREEN}[OK] FII/DII updated for {f_date}{C.RESET}")
-    except Exception as e:
-        print(f"  {C.YELLOW}[WARN] Failed to fetch live FII/DII: {e}{C.RESET}")
+                        new_row = pd.DataFrame([{"date": pd.to_datetime(f_date).strftime("%Y-%m-%d"), "fii_net": fii_net, "dii_net": dii_net}])
+                        
+                        if df_fii is not None:
+                            # Drop if exists, append new
+                            df_fii = df_fii[df_fii["date"] != new_row["date"].iloc[0]]
+                            df_fii = pd.concat([df_fii, new_row], ignore_index=True)
+                        else:
+                            df_fii = new_row
+                            
+                        df_fii.to_csv(fiidii_path, index=False)
+                        print(f"  {C.GREEN}[OK] FII/DII updated for {f_date}{C.RESET}")
+        except Exception as e:
+            print(f"  {C.YELLOW}[WARN] Failed to fetch live FII/DII: {e}{C.RESET}")
 
     # 2. PCR
     pcr_path = _csv_path("pcr")
@@ -204,44 +208,45 @@ def fetch_sentiment_data():
     if os.path.exists(pcr_path):
         df_pcr = pd.read_csv(pcr_path)
         
-    try:
-        # NSE Option chain via requests
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': '*/*','Accept-Language': 'en-US,en;q=0.5'
-        }
-        url = "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY"
-        # Need a session to grab cookies first
-        session = requests.Session()
-        session.get("https://www.nseindia.com", headers=headers, timeout=2.0)
-        resp = session.get(url, headers=headers, timeout=3.0)
-        
-        if resp.status_code == 200:
-            data = resp.json()
-            records = data.get("records", {})
-            data_list = records.get("data", [])
-            pe_oi = sum(r.get("PE", {}).get("openInterest", 0) for r in data_list)
-            ce_oi = sum(r.get("CE", {}).get("openInterest", 0) for r in data_list)
-            pcr_val = pe_oi / max(1, ce_oi)
+    if live:
+        try:
+            # NSE Option chain via requests
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': '*/*','Accept-Language': 'en-US,en;q=0.5'
+            }
+            url = "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY"
+            # Need a session to grab cookies first
+            session = requests.Session()
+            session.get("https://www.nseindia.com", headers=headers, timeout=2.0)
+            resp = session.get(url, headers=headers, timeout=3.0)
             
-            today_iso = datetime.now().strftime("%Y-%m-%d")
-            new_row = pd.DataFrame([{"date": today_iso, "pcr": round(pcr_val, 3)}])
-            
-            if df_pcr is not None:
-                # Drop if exists, append new
-                df_pcr = df_pcr[df_pcr["date"] != new_row["date"].iloc[0]]
-                df_pcr = pd.concat([df_pcr, new_row], ignore_index=True)
-            else:
-                df_pcr = new_row
+            if resp.status_code == 200:
+                data = resp.json()
+                records = data.get("records", {})
+                data_list = records.get("data", [])
+                pe_oi = sum(r.get("PE", {}).get("openInterest", 0) for r in data_list)
+                ce_oi = sum(r.get("CE", {}).get("openInterest", 0) for r in data_list)
+                pcr_val = pe_oi / max(1, ce_oi)
                 
-            df_pcr.to_csv(pcr_path, index=False)
-            print(f"  {C.GREEN}[OK] PCR updated: {pcr_val:.3f}{C.RESET}")
-    except Exception as e:
-        print(f"  {C.CYAN}[FALLBACK] Live PCR timeout ({e}), using daily cache{C.RESET}")
+                today_iso = datetime.now().strftime("%Y-%m-%d")
+                new_row = pd.DataFrame([{"date": today_iso, "pcr": round(pcr_val, 3)}])
+                
+                if df_pcr is not None:
+                    # Drop if exists, append new
+                    df_pcr = df_pcr[df_pcr["date"] != new_row["date"].iloc[0]]
+                    df_pcr = pd.concat([df_pcr, new_row], ignore_index=True)
+                else:
+                    df_pcr = new_row
+                    
+                df_pcr.to_csv(pcr_path, index=False)
+                print(f"  {C.GREEN}[OK] PCR updated: {pcr_val:.3f}{C.RESET}")
+        except Exception as e:
+            print(f"  {C.CYAN}[FALLBACK] Live PCR timeout ({e}), using daily cache{C.RESET}")
         
     return df_fii, df_pcr
 
-def load_all_data():
+def load_all_data(live_sentiment=True):
     """
     Fetch and merge NIFTY + VIX + S&P 500 into a single DataFrame.
     Returns a clean, merged DataFrame ready for feature engineering.
@@ -262,7 +267,7 @@ def load_all_data():
     df = df.merge(sp_cols, on="date", how="left")
     
     # Fetch and merge sentiment features (PCR, FII/DII)
-    df_fii, df_pcr = fetch_sentiment_data()
+    df_fii, df_pcr = fetch_sentiment_data(live=live_sentiment)
     
     if df_fii is not None:
         df_fii["date"] = pd.to_datetime(df_fii["date"])
