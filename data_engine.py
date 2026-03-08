@@ -187,12 +187,15 @@ def fetch_sentiment_data():
         
     try:
         # NSE Option chain via requests
-        headers = {'User-Agent': 'Mozilla/5.0'}
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': '*/*','Accept-Language': 'en-US,en;q=0.5'
+        }
         url = "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY"
         # Need a session to grab cookies first
         session = requests.Session()
-        session.get("https://www.nseindia.com", headers=headers, timeout=5)
-        resp = session.get(url, headers=headers, timeout=5)
+        session.get("https://www.nseindia.com", headers=headers, timeout=2.0)
+        resp = session.get(url, headers=headers, timeout=3.0)
         
         if resp.status_code == 200:
             data = resp.json()
@@ -215,7 +218,7 @@ def fetch_sentiment_data():
             df_pcr.to_csv(pcr_path, index=False)
             print(f"  {C.GREEN}[OK] PCR updated: {pcr_val:.3f}{C.RESET}")
     except Exception as e:
-        print(f"  {C.YELLOW}[WARN] Failed to fetch live PCR: {e}{C.RESET}")
+        print(f"  {C.CYAN}[FALLBACK] Live PCR timeout ({e}), using daily cache{C.RESET}")
         
     return df_fii, df_pcr
 
