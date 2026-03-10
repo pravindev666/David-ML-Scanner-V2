@@ -46,7 +46,7 @@ NIFTY_SYMBOL = "^NSEI"
 VIX_SYMBOL = "^INDIAVIX"
 SP500_SYMBOL = "^GSPC"
 DATA_START_YEAR = 2011
-LOT_SIZE = 75  # Nifty lot size (adjust as NSE updates)
+LOT_SIZE = 65  # Nifty lot size (adjust as NSE updates)
 
 # Direction labels
 UP = "UP"

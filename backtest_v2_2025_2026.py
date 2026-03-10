@@ -19,7 +19,6 @@ sys.path.insert(0, BASE_DIR)
 from data_engine import load_all_data
 from feature_forge import engineer_features
 from models.ensemble_classifier import EnsembleClassifier
-from models.lstm_classifier import LSTMClassifier
 from utils import UP, DOWN, SIDEWAYS
 
 
@@ -33,12 +32,13 @@ def classify_regime(row):
 
 def run_v2_backtest():
     print("=" * 65)
-    print("  DAVID V2 BACKTEST")
+    print("  DAVID V2 BACKTEST (Post-Audit)")
     print("  Train: 2011 — Dec 2024 | Test: Jan 2025 — Mar 2026")
-    print("  Architecture: Regime Trees + LSTM Hybrid")
+    print("  Architecture: Regime-Aware Tree Ensembles (No Leakage)")
     print("=" * 65)
 
     df_raw = load_all_data()
+    # Corrected features (No leakage, corrected expiry)
     df, feature_cols = engineer_features(df_raw, target_horizon=1)
 
     train_end = "2025-01-01"
@@ -56,24 +56,13 @@ def run_v2_backtest():
     regime_models = {}
     for regime in ["TRENDING", "CHOPPY", "VOLATILE"]:
         df_regime = df_train[df_train.apply(classify_regime, axis=1) == regime].copy()
-        if len(df_regime) < 200:
+        if len(df_regime) < 100:
             df_regime = df_train.copy()
         m = EnsembleClassifier()
+        # Note: EnsembleClassifier now uses internal TimeSeriesSplit scaling (no leakage)
         m.train(df_regime, feature_cols, verbose=False)
         regime_models[regime] = m
         print(f"    {regime}: {len(df_regime)} samples")
-
-    # ── Train LSTM ──
-    print(f"\n{'='*65}")
-    print("  Training LSTM Sequence Model...")
-    print(f"{'='*65}")
-
-    lstm = LSTMClassifier(seq_len=10, hidden_size=64, num_layers=2, lr=0.001, epochs=80, batch_size=64)
-    lstm.train(df_train, feature_cols, verbose=True)
-
-    # ── Get LSTM predictions ──
-    lstm_preds, lstm_probs = lstm.predict(df_test)
-    lstm_offset = lstm.seq_len
 
     # ── Evaluate ──
     print(f"\n{'='*65}")
@@ -81,13 +70,12 @@ def run_v2_backtest():
     print(f"{'='*65}")
 
     results = {
-        "Trees (Regime)": {"correct": 0, "total": 0, "trades": []},
-        "LSTM Only": {"correct": 0, "total": 0, "trades": []},
-        "Hybrid (Trees+LSTM)": {"correct": 0, "total": 0, "trades": []},
+        "Regime-Aware Trees": {"correct": 0, "total": 0, "trades": []},
     }
 
-    for i in range(lstm_offset, len(df_test)):
-        row = df_test.iloc[i]
+    test_rows = df_test.to_dict('records')
+    for i in range(len(test_rows)):
+        row = test_rows[i]
         date = row['date']
         price_now = row['close']
         regime = classify_regime(row)
@@ -105,54 +93,20 @@ def run_v2_backtest():
         tree_pred = regime_models.get(regime, regime_models["TRENDING"]).predict(row)
         tree_dir = tree_pred['direction']
         tree_conf = tree_pred['confidence']
-        tree_probs = np.array([tree_pred['prob_up'], tree_pred['prob_down'], tree_pred['prob_sideways']])
-
-        # LSTM prediction
-        lstm_idx = i - lstm_offset
-        lstm_prob = lstm_probs[lstm_idx]
-        lstm_class = lstm_preds[lstm_idx]
-        lstm_dir = {0: UP, 1: DOWN, 2: SIDEWAYS}[lstm_class]
-        lstm_conf = float(lstm_prob[lstm_class])
-
-        # Hybrid
-        hybrid_probs = (tree_probs + lstm_prob) / 2.0
-        hybrid_class = int(np.argmax(hybrid_probs))
-        hybrid_dir = {0: UP, 1: DOWN, 2: SIDEWAYS}[hybrid_class]
-        hybrid_conf = float(hybrid_probs[hybrid_class])
 
         def check(verdict, pct):
             if verdict == UP and pct > 0: return True
             if verdict == DOWN and pct < 0: return True
-            if verdict == SIDEWAYS and abs(pct) < 0.5: return True
+            if verdict == SIDEWAYS and abs(pct) < 0.3: return True
             return False
 
-        # Trees
+        # Apply basic confidence filter
         if tree_conf * 100 >= 40:
             c = check(tree_dir, pct_change)
-            results["Trees (Regime)"]["total"] += 1
-            if c: results["Trees (Regime)"]["correct"] += 1
-            results["Trees (Regime)"]["trades"].append({
+            results["Regime-Aware Trees"]["total"] += 1
+            if c: results["Regime-Aware Trees"]["correct"] += 1
+            results["Regime-Aware Trees"]["trades"].append({
                 "date": date, "dir": tree_dir, "conf": tree_conf * 100,
-                "pct": pct_change, "correct": c, "regime": regime
-            })
-
-        # LSTM
-        if lstm_conf * 100 >= 40:
-            c = check(lstm_dir, pct_change)
-            results["LSTM Only"]["total"] += 1
-            if c: results["LSTM Only"]["correct"] += 1
-            results["LSTM Only"]["trades"].append({
-                "date": date, "dir": lstm_dir, "conf": lstm_conf * 100,
-                "pct": pct_change, "correct": c, "regime": regime
-            })
-
-        # Hybrid
-        if hybrid_conf * 100 >= 40:
-            c = check(hybrid_dir, pct_change)
-            results["Hybrid (Trees+LSTM)"]["total"] += 1
-            if c: results["Hybrid (Trees+LSTM)"]["correct"] += 1
-            results["Hybrid (Trees+LSTM)"]["trades"].append({
-                "date": date, "dir": hybrid_dir, "conf": hybrid_conf * 100,
                 "pct": pct_change, "correct": c, "regime": regime
             })
 
@@ -160,6 +114,56 @@ def run_v2_backtest():
     print("\n\n" + "=" * 65)
     print("  BACKTEST RESULTS: Jan 2025 — Mar 2026")
     print("=" * 65)
+
+    md = ["# David V2 Backtest Report (Regime-Aware Trees Only)"]
+    md.append(f"\n**Audit Status**: Critical Leakage Fixed | Expiry Fixed | No LSTM")
+    md.append(f"**Train Period**: 2011 — Dec 2024")
+    md.append(f"**Test Period**: Jan 2025 — Mar 2026 (fully out-of-sample)\n")
+
+    md.append("## Accuracy Summary")
+    
+    r = results["Regime-Aware Trees"]
+    acc = (r['correct'] / max(1, r['total'])) * 100
+    print(f"  📊 Accuracy: {r['correct']}/{r['total']} = {acc:.1f}%")
+    md.append(f"| Model | Signals | Correct | Accuracy |")
+    md.append(f"|:---|:---:|:---:|:---:|")
+    md.append(f"| 🌳 Regime-Aware Trees | {r['total']} | {r['correct']} | **{acc:.1f}%** |")
+
+    # ── Spread Strategy Analysis ──
+    trades = r['trades']
+    wins = [t for t in trades if t['correct']]
+    losses = [t for t in trades if not t['correct']]
+
+    avg_win_pct = np.mean([abs(t['pct']) for t in wins]) if wins else 0
+    avg_loss_pct = np.mean([abs(t['pct']) for t in losses]) if losses else 0
+    
+    md.append("\n## Spread Strategy Simulation")
+    md.append("| Metric | Value |")
+    md.append("|:---|:---|")
+    md.append(f"| Total Signals | {len(trades)} |")
+    md.append(f"| Winning Days | {len(wins)} ({len(wins)/max(1,len(trades))*100:.0f}%) |")
+    md.append(f"| Losing Days | {len(losses)} ({len(losses)/max(1,len(trades))*100:.0f}%) |")
+    md.append(f"| Avg Move (Win) | {avg_win_pct:.2f}% |")
+    md.append(f"| Avg Move (Loss) | {avg_loss_pct:.2f}% |")
+
+    # ── By Regime Breakdown ──
+    md.append("\n## Accuracy by Regime")
+    md.append("| Regime | Signals | Accuracy |")
+    md.append("|:---|:---:|:---:|")
+
+    for regime in ["TRENDING", "CHOPPY", "VOLATILE"]:
+        rt = [t for t in trades if t['regime'] == regime]
+        rw = [t for t in rt if t['correct']]
+        r_acc = len(rw) / max(1, len(rt)) * 100
+        md.append(f"| {regime} | {len(rt)} | **{r_acc:.0f}%** |")
+        print(f"    {regime}: {len(rw)}/{len(rt)} = {r_acc:.0f}%")
+
+    report = "\n".join(md)
+    out_path = os.path.join(BASE_DIR, "backtest_v2_2025_2026.md")
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(report)
+
+    print(f"\n  Report saved to: {out_path}")
 
     md = ["# David V2 Backtest Report"]
     md.append(f"\n**Train Period**: 2011 — Dec 2024")

@@ -125,20 +125,18 @@ class EnsembleClassifier:
         X = df[feature_cols].values
         y = df["target"].values.astype(int)
         
-        # Scale features
-        X_scaled = self.scaler.fit_transform(X)
-        
-        if verbose:
-            print(f"\n{C.header('TRAINING ENSEMBLE CLASSIFIER')}")
-            print(f"  Samples: {len(X)} | Features: {len(feature_cols)} | Classes: 3")
-        
         # ─── Walk-Forward Cross-Validation ────────────────────────────────
         tscv = TimeSeriesSplit(n_splits=5)
         fold_scores = {name: [] for name in ["XGBoost", "LightGBM", "CatBoost"]}
         
-        for fold, (train_idx, test_idx) in enumerate(tscv.split(X_scaled)):
-            X_train, X_test = X_scaled[train_idx], X_scaled[test_idx]
+        for fold, (train_idx, test_idx) in enumerate(tscv.split(X)):
+            X_train_raw, X_test_raw = X[train_idx], X[test_idx]
             y_train, y_test = y[train_idx], y[test_idx]
+            
+            # Scale features ONLY on training data for this fold
+            fold_scaler = StandardScaler()
+            X_train = fold_scaler.fit_transform(X_train_raw)
+            X_test = fold_scaler.transform(X_test_raw)
             
             fold_models = self._build_models()
             
@@ -158,8 +156,13 @@ class EnsembleClassifier:
             self.validation_scores[name] = avg
         
         total_score = sum(self.validation_scores.values())
-        for name in self.validation_scores:
-            self.weights[name] = self.validation_scores[name] / total_score
+        if total_score > 0:
+            for name in self.validation_scores:
+                self.weights[name] = self.validation_scores[name] / total_score
+        else:
+            # Fallback to equal weights if all scores are 0
+            for name in self.validation_scores:
+                self.weights[name] = 1.0 / len(self.validation_scores)
         
         if verbose:
             print(f"\n  {C.CYAN}Model Weights (performance-based):{C.RESET}")
@@ -167,6 +170,9 @@ class EnsembleClassifier:
                 print(f"    {name:>10}: {w:.3f} (CV accuracy: {self.validation_scores[name]:.1%})")
         
         # ─── Train Final Models on Full Data ──────────────────────────────
+        # Use full historical scaling for the final production model
+        X_scaled = self.scaler.fit_transform(X)
+        
         self.models = self._build_models()
         for name, model in self.models.items():
             model.fit(X_scaled, y)

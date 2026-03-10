@@ -17,11 +17,6 @@ from models.ensemble_classifier import EnsembleClassifier
 from models.regime_detector import RegimeDetector
 from models.range_predictor import RangePredictor
 from models.sr_engine import SREngine
-try:
-    from models.lstm_classifier import LSTMClassifier
-    HAS_LSTM = True
-except ImportError:
-    HAS_LSTM = False
 from analyzers.whipsaw_detector import WhipsawDetector
 from analyzers.iron_condor_analyzer import IronCondorAnalyzer
 from analyzers.bounce_analyzer import BounceAnalyzer
@@ -115,21 +110,6 @@ def load_oracle():
         ensemble.train(df, features)
         ensemble.save()
 
-    # Load (or train) LSTM (optional — requires PyTorch)
-    lstm = None
-    if HAS_LSTM:
-        lstm = LSTMClassifier(seq_len=10)
-        try:
-            if not lstm.load():
-                lstm.train(df, features, verbose=False)
-                lstm.save()
-        except Exception:
-            try:
-                lstm.train(df, features, verbose=False)
-                lstm.save()
-            except Exception:
-                lstm = None
-        
     regime = RegimeDetector()
     try:
         if not regime.load():
@@ -160,7 +140,6 @@ def load_oracle():
         "ensemble": ensemble,
         "regime_models": regime_models,
         "classify_regime": classify_regime,
-        "lstm": lstm,
         "regime": regime,
         "range_pred": range_pred,
         "sr": sr,
@@ -222,20 +201,10 @@ current_regime = classify_fn(latest_row)
 regime_model = oracle["regime_models"].get(current_regime, oracle["ensemble"])
 tree_pred = regime_model.predict_today(df)
 
-# LSTM prediction (optional — may be None if PyTorch not installed)
-lstm = oracle.get("lstm")
-lstm_pred = None
-if lstm is not None:
-    lstm_pred = lstm.predict_today(df)
-
 # Determine final prediction:
-# Always use Trees (63.3% backtest) — LSTM shown as second opinion only.
-# This ensures localhost and Streamlit Cloud show the SAME verdict.
+# Always use Trees (63.3% backtest)
 pred = tree_pred
-if lstm_pred is not None:
-    engine_label = "Trees (Primary) + LSTM (Advisory)"
-else:
-    engine_label = "Trees Only (No LSTM)"
+engine_label = "Tree Ensemble (Regime-Aware)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TAB 1: DASHBOARD
@@ -292,7 +261,7 @@ if mode == "Dashboard":
                 marker_color=['#00FF7F', '#7CFC00', '#FFD700', '#FFA500', '#FF4500']
             ))
             fig.update_layout(height=250, margin=dict(l=0,r=0,t=0,b=0), paper_bgcolor="rgba(0,0,0,0)",
-                              yaxis=dict(autorange="reversed"))
+                               yaxis=dict(autorange="reversed"))
             st.plotly_chart(fig, use_container_width=True)
 
     with col3:
@@ -316,7 +285,7 @@ if mode == "Dashboard":
     st.markdown("---")
     st.markdown("### 🧬 Intelligence Breakdown")
     st.caption(f"🔧 Engine: **{engine_label}**")
-    b_col1, b_col2, b_col3 = st.columns(3)
+    b_col1, b_col2 = st.columns(2)
     
     with b_col1:
         st.markdown("**🌳 Tree Ensemble (Regime)**")
@@ -327,22 +296,10 @@ if mode == "Dashboard":
         st.caption(f"Regime model: {current_regime}")
         
     with b_col2:
-        st.markdown("**🧠 LSTM (Sequence)**")
-        if lstm_pred is not None:
-            l_dir = lstm_pred["direction"]
-            l_conf = lstm_pred["confidence"] * 100
-            l_color = "green" if l_dir == UP else "red" if l_dir == DOWN else "orange"
-            st.markdown(f"<span style='color:{l_color}; font-size:24px; font-weight:bold;'>{l_dir}</span> ({l_conf:.0f}%)", unsafe_allow_html=True)
-            st.caption("Pattern recognition over the last 10 days.")
-        else:
-            st.markdown("⚠️ *LSTM Offline*")
-            st.caption("PyTorch not installed. Using trees only.")
-            
-    with b_col3:
         st.markdown("**🦅 Final Verdict**")
         h_color = "green" if pred["direction"] == UP else "red" if pred["direction"] == DOWN else "orange"
         st.markdown(f"<span style='color:{h_color}; font-size:24px; font-weight:bold;'>{pred['direction']}</span> ({pred['confidence']*100:.0f}%)", unsafe_allow_html=True)
-        st.caption("Same as Trees — the primary model (63% OOS accuracy).")
+        st.caption("Derived from the weighted ensemble of Gradient Boosted Trees.")
 
     # ── Row 3: Market Sentiment ──
     st.markdown("---")

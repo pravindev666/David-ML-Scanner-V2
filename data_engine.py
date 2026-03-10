@@ -23,7 +23,7 @@ try:
     from nsepython import nse_fiidii
 except ImportError:
     nse_fiidii = None
-    raise ImportError("yfinance is required. Install with: pip install yfinance")
+    print(f"  {C.YELLOW}[WARN] nsepython not installed. Sentiment features will be limited.{C.RESET}")
 
 from utils import DATA_DIR, NIFTY_SYMBOL, VIX_SYMBOL, SP500_SYMBOL, DATA_START_YEAR, C
 
@@ -230,7 +230,11 @@ def fetch_sentiment_data(live=True):
                 data_list = records.get("data", [])
                 pe_oi = sum(r.get("PE", {}).get("openInterest", 0) for r in data_list)
                 ce_oi = sum(r.get("CE", {}).get("openInterest", 0) for r in data_list)
-                pcr_val = pe_oi / max(1, ce_oi)
+                
+                if pe_oi == 0 and ce_oi == 0:
+                    pcr_val = 1.0  # Safe fallback if NSE returns empty option chain
+                else:
+                    pcr_val = pe_oi / max(1, ce_oi)
                 
                 today_iso = datetime.now().strftime("%Y-%m-%d")
                 new_row = pd.DataFrame([{"date": today_iso, "pcr": round(pcr_val, 3)}])

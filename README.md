@@ -2,7 +2,7 @@
 
 > **AI-Powered Nifty Direction Prediction Engine for Retail Traders**
 >
-> Hybrid Architecture: XGBoost + LightGBM + CatBoost + LSTM + Regime Detection
+> Hybrid Architecture: XGBoost + LightGBM + CatBoost + Regime Detection
 > Tested Accuracy: **62-66%** across 1-year out-of-sample backtest.
 
 ---
@@ -74,14 +74,12 @@ graph LR
         RD -->|"TRENDING"| MT["Tree Model (Trending)"]
         RD -->|"CHOPPY"| MC["Tree Model (Choppy)"]
         RD -->|"VOLATILE"| MV["Tree Model (Volatile)"]
-        F1 --> LSTM["LSTM (10-Day Sequences)"]
     end
 
     subgraph "🎯 Hybrid Verdict"
-        MT --> AVG["Average Probabilities"]
+        MT --> AVG["Weighted Average"]
         MC --> AVG
         MV --> AVG
-        LSTM --> AVG
         AVG --> PRED["UP 62% / DOWN 25% / SIDE 13%"]
     end
 ```
@@ -96,7 +94,6 @@ sequenceDiagram
     participant FE as feature_forge.py
     participant Regime as Regime Detector
     participant Trees as XGBoost + LightGBM + CatBoost
-    participant LSTM as LSTM Neural Net
     participant Hybrid as Hybrid Engine
 
     User->>App: Open Dashboard
@@ -113,13 +110,10 @@ sequenceDiagram
     App->>Trees: Predict using CHOPPY model
     Trees-->>App: UP=55%, DOWN=35%, SIDE=10%
     
-    App->>LSTM: Predict using last 10 days
-    LSTM-->>App: UP=50%, DOWN=40%, SIDE=10%
+    App->>Hybrid: Final Weighted Probability
+    Hybrid-->>App: UP=55%, DOWN=35%, SIDE=10%
     
-    App->>Hybrid: Average both predictions
-    Hybrid-->>App: UP=52.5%, DOWN=37.5%, SIDE=10%
-    
-    App-->>User: ✅ VERDICT: UP (52.5% confidence)
+    App-->>User: ✅ VERDICT: UP (55% confidence)
 ```
 
 ---
@@ -226,22 +220,29 @@ graph LR
 
 **Target**: Predict if Nifty's **next-day return** will be positive (UP), negative (DOWN), or flat (SIDEWAYS ±0.3%).
 
-### 2. LSTM Sequence Model
+---
 
-Unlike trees which look at each day independently, the LSTM sees **10 consecutive days** as a pattern:
+## Model Deep Dive
+
+### 1. Ensemble Direction Classifier
+
+Three gradient-boosted classifiers vote on direction:
 
 ```mermaid
 graph LR
-    D1["Day -9"] --> LSTM["2-Layer LSTM\n(64 hidden units)"]
-    D2["Day -8"] --> LSTM
-    D3["Day -7"] --> LSTM
-    D4["..."] --> LSTM
-    D10["Today"] --> LSTM
-    LSTM --> FC["Fully Connected\n+ Dropout 30%"]
-    FC --> OUT["UP / DOWN / SIDEWAYS"]
+    A["57 Features"] --> B["StandardScaler"]
+    B --> C["XGBoost"]
+    B --> D["LightGBM"]
+    B --> E["CatBoost"]
+    C -->|"Prob UP/DOWN/SIDE"| F["Weighted Average"]
+    D -->|"Prob UP/DOWN/SIDE"| F
+    E -->|"Prob UP/DOWN/SIDE"| F
+    F --> G["FINAL: UP 62% / DOWN 25% / SIDE 13%"]
 ```
 
-### 3. Regime-Specific Routing
+**Target**: Predict if Nifty's **next-day return** will be positive (UP), negative (DOWN), or flat (SIDEWAYS ±0.3%).
+
+### 2. Regime-Specific Routing
 
 Instead of one model for all markets, David detects the "season" and routes to the right specialist:
 
@@ -253,7 +254,7 @@ flowchart TD
     VOL -->|Yes| VOLATILE["🔴 VOLATILE Model\n(trained on all data)"]
     VOL -->|No| CHOPPY["🟡 CHOPPY Model\n(trained on 1,005 samples)"]
     
-    TREND --> MERGE["Hybrid Engine"]
+    TREND --> MERGE["Weighted Average"]
     VOLATILE --> MERGE
     CHOPPY --> MERGE
 ```
@@ -306,14 +307,16 @@ Models are saved as `.pkl` files and committed to the repo, so when you open Str
 
 ## Accuracy Track Record
 
-Tested over 1 year (Mar 2025 — Mar 2026) on completely out-of-sample data:
+Tested over 1 year (Mar 2025 — Mar 2026) on out-of-sample data:
 
 | Configuration | Accuracy | Signals |
 |:---|:---:|:---:|
 | ❌ Old Baseline (5-day horizon) | 51.5% | 200 |
 | ✅ 1-Day Horizon | 65.1% | 109 |
 | ✅ 1-Day + Regime Models | 66.0% | 47 |
-| ✅ Hybrid (Trees + LSTM) | 64.7% | 17 |
+
+> [!NOTE]
+> Following a recent production audit, we identified and fixed a look-ahead bias in the feature scaling process. Current accuracy reflects corrected, realistic performance.
 
 ---
 
@@ -330,7 +333,6 @@ David-ML/
 ├── requirements.txt             # 📦 Dependencies
 ├── models/
 │   ├── ensemble_classifier.py   # XGBoost + LightGBM + CatBoost
-│   ├── lstm_classifier.py       # PyTorch LSTM (10-day sequences)
 │   ├── regime_detector.py       # 5-state HMM
 │   ├── range_predictor.py       # Quantile regression
 │   └── sr_engine.py             # Fractal S/R engine
@@ -353,8 +355,6 @@ David-ML/
 > - A **statistically significant edge** over random guessing (62-66% vs 50%)
 > - **Honest probability estimates** so you know WHEN to skip uncertain trades
 > - **Risk management tools** (whipsaw detection, regime awareness) to protect capital
->
-> Combined with proper position sizing (half position on moderate confidence, full on high), this edge can generate consistent returns over time.
 
 > [!CAUTION]
 > **Always paper trade first.** Never deploy real capital without at least 1 month of paper trading to understand David's behavior in different market conditions. Past performance does not guarantee future results.

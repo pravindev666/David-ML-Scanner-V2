@@ -6,7 +6,7 @@ Powers the PyQt5 desktop app. All heavy operations run in threads.
 Functions:
     fetch_spot()        → grabs live NIFTY + VIX (2 seconds)
     sync_all_data()     → downloads full CSV history (10 seconds)
-    train_all_models()  → trains 5 ML models from CSVs (3 minutes)
+    train_all_models()  → trains 4 ML models from CSVs (3 minutes)
     predict_now()       → loads .pkl + CSVs + live spot → full prediction
     get_data_status()   → returns CSV freshness info
 """
@@ -97,8 +97,37 @@ def fetch_spot():
             elif len(vix.columns) > 0 and isinstance(vix.columns[0], tuple):
                 vix.columns = [c[0] for c in vix.columns]
             
-            result["vix_value"] = float(vix["Close"].iloc[-1])
-            log(f"  ✅ VIX: {result['vix_value']:.2f}")
+            vix_date = pd.to_datetime(vix.index[-1]).tz_localize(None)
+            yf_vix = float(vix["Close"].iloc[-1])
+            
+            # Start with YF as the baseline
+            best_date = vix_date
+            best_vix = yf_vix
+            source = "YF"
+            
+            # Check Daily CSV
+            daily_path = os.path.join(DATA_DIR, "vix_daily.csv")
+            if os.path.exists(daily_path):
+                df_daily = pd.read_csv(daily_path)
+                daily_last_date = pd.to_datetime(df_daily["date"].iloc[-1]).tz_localize(None)
+                if daily_last_date > best_date:
+                    best_date = daily_last_date
+                    best_vix = float(df_daily["close"].iloc[-1])
+                    source = "Daily CSV"
+                    
+            # Check 15m CSV
+            m15_path = os.path.join(DATA_DIR, "INDIAVIX_15minute_2001_now.csv")
+            if os.path.exists(m15_path):
+                df_15m = pd.read_csv(m15_path)
+                last_15m_date = pd.to_datetime(df_15m["date"].iloc[-1]).tz_localize(None)
+                if last_15m_date > best_date:
+                    best_date = last_15m_date
+                    best_vix = float(df_15m["Close"].iloc[-1])
+                    source = "15m CSV"
+            
+            result["vix_value"] = best_vix
+            log(f"  ✅ VIX: {result['vix_value']:.2f} (Source: {source})")
+
         else:
             log("  ⚠️ No VIX data returned")
     except Exception as e:
@@ -154,7 +183,7 @@ def sync_all_data():
 
 def train_all_models():
     """
-    Train all 5 ML models from the CSV data and save as .pkl files.
+    Train all 4 ML models from the CSV data and save as .pkl files.
     Uses the existing train_models.py logic.
     
     Returns:
@@ -172,10 +201,11 @@ def train_all_models():
         from models.ensemble_classifier import EnsembleClassifier
         from models.regime_detector import RegimeDetector
         from models.range_predictor import RangePredictor
+        from models.intraday_classifier import IntradayClassifier
         import joblib
         
-        # Load data
-        log("\n[1/5] Loading data...")
+        # Load daily data
+        log("\n[1/6] Loading daily data...")
         df_raw = load_all_data(live_sentiment=False)  # Use cached CSVs
         df, features = engineer_features(df_raw)
         log(f"  ✅ Data loaded: {len(df)} rows, {len(features)} features")
@@ -229,6 +259,20 @@ def train_all_models():
         joblib.dump(regime_models, regime_models_path)
         result["models_trained"].append("regime_models")
         log("  ✅ Regime models saved")
+        
+        # Train Intraday 15M Classifier
+        log("\n[6/6] Training 15M Intraday Classifier...")
+        intra_model = IntradayClassifier()
+        try:
+            acc = intra_model.train(log_fn=log)
+            intra_model.save()
+            result["models_trained"].append("intraday_classifier")
+            log(f"  ✅ Intraday Classifier saved (Test Acc: {acc*100:.1f}%)")
+        except FileNotFoundError:
+            log("  ⚠️ Missing 15m data CSVs. Intraday model skipped (Sync 15m Data first).")
+        except Exception as e:
+            log(f"  ❌ Failed to train Intraday model: {e}")
+            
         result["success"] = True
         log(f"\n{'═' * 50}")
         log(f"✅ ALL CORE MODELS TRAINED! ({len(result['models_trained'])} models)")
@@ -596,34 +640,48 @@ def get_hold_exit_signal(entry_direction, entry_price, entry_date, prediction=No
         result["recovery_prob"] = recovery
         
         # ─── Decision Logic ──────────────────────────────────────────
-        entry_dir = entry_direction.upper()
+        entry_dir_full = entry_direction.upper()
+        is_credit = "CREDIT" in entry_dir_full
         
-        # Case 1: Direction still agrees
-        if current_direction and entry_dir in str(current_direction).upper():
+        if "UP" in entry_dir_full: base_dir = "UP"
+        elif "DOWN" in entry_dir_full: base_dir = "DOWN"
+        else: base_dir = "SIDEWAYS"
+        
+        # 1. Special Case: Credit Spread in Sideways Market
+        if is_credit and current_direction == "SIDEWAYS" and base_dir != "SIDEWAYS":
+            if current_confidence >= 50:
+                result["signal"] = "HOLD"
+                result["message"] = f"✅ HOLD — Sideways regime ({current_confidence:.0f}%). Your credit spread captures theta decay."
+            else:
+                result["signal"] = "HOLD"
+                result["message"] = f"⚠️ HOLD (cautious) — Chop expected. Credit spread survives sideways action."
+                
+        # 2. Case: Direction still agrees perfectly
+        elif current_direction and base_dir == current_direction:
             if current_confidence >= 50:
                 result["signal"] = "HOLD"
                 result["message"] = f"✅ HOLD — Direction still {current_direction} ({current_confidence:.0f}%). Stay in."
             elif current_confidence >= 40:
                 result["signal"] = "HOLD"
-                result["message"] = f"⚠️ HOLD (cautious) — Direction agrees but confidence weakening ({current_confidence:.0f}%)."
+                result["message"] = f"⚠️ HOLD (cautious) — Direction agrees but conviction weakening ({current_confidence:.0f}%)."
             else:
                 result["signal"] = "HEDGE"
-                result["message"] = f"⚠️ HEDGE — Direction agrees but confidence very low ({current_confidence:.0f}%). Add protection."
+                result["message"] = f"⚠️ HEDGE — Direction agrees but conviction very low ({current_confidence:.0f}%). Protect it."
         
-        # Case 2: Direction flipped
+        # 3. Case: Direction flipped against you
         elif current_direction:
             if current_confidence >= 55:
                 result["signal"] = "EXIT"
                 result["message"] = f"🔴 EXIT — Direction flipped to {current_direction} ({current_confidence:.0f}%). Close position."
             elif current_confidence >= 40:
                 result["signal"] = "HEDGE"
-                result["message"] = f"⚠️ HEDGE — Direction shifted to {current_direction} ({current_confidence:.0f}%). Consider hedging."
+                result["message"] = f"⚠️ HEDGE — Direction shifting to {current_direction} ({current_confidence:.0f}%). Consider hedging."
             else:
                 result["signal"] = "HOLD"
                 result["message"] = f"🟡 HOLD — Direction unclear ({current_direction} at {current_confidence:.0f}%). Wait for clarity."
         
-        # Case 3: Regime danger
-        if pred.get("regime") == "VOLATILE" and entry_dir != "SIDEWAYS":
+        # 4. Case: Regime danger
+        if pred.get("regime") == "VOLATILE" and base_dir != "SIDEWAYS":
             if result["signal"] != "EXIT":
                 result["signal"] = "HEDGE"
                 result["message"] += " ⚠️ Regime is VOLATILE — tighten stops."
@@ -662,7 +720,8 @@ def get_recovery_probability(current_price, entry_price, direction):
         df = load_all_data(live_sentiment=False)
         
         # Calculate current drawdown
-        if direction.upper() == "UP":
+        dir_upper = direction.upper()
+        if "UP" in dir_upper:
             dd_pct = ((current_price - entry_price) / entry_price) * 100
         else:
             dd_pct = ((entry_price - current_price) / entry_price) * 100
@@ -688,7 +747,7 @@ def get_recovery_probability(current_price, entry_price, direction):
                     continue
                 drop = ((closes[i + window] - closes[i]) / closes[i]) * 100
                 
-                if direction.upper() == "UP":
+                if "UP" in dir_upper:
                     historical_dd = drop  # negative = drawdown for bulls
                 else:
                     historical_dd = -drop  # positive move = drawdown for bears
@@ -697,7 +756,7 @@ def get_recovery_probability(current_price, entry_price, direction):
                     # Found similar drawdown — check recovery
                     recovery_found = False
                     for j in range(i + window + 1, min(i + window + 31, len(closes))):
-                        if direction.upper() == "UP":
+                        if "UP" in dir_upper:
                             recovery = ((closes[j] - closes[i]) / closes[i]) * 100
                         else:
                             recovery = ((closes[i] - closes[j]) / closes[i]) * 100
@@ -825,6 +884,230 @@ def predict_intraday_now():
 # ═══════════════════════════════════════════════════════════════════════════════
 # SELF-TEST
 # ═══════════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZERO ANXIETY SYSTEM — Traffic Light, Strategy Recommender, Morning Briefing
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def compute_traffic_light(pred):
+    """
+    Analyze all signals and return a single GREEN / YELLOW / RED verdict.
+    
+    GREEN: Strong signal, safe to trade
+    YELLOW: Mixed signals, reduce size or wait
+    RED: Do not trade
+    """
+    if pred is None or not pred.get("success"):
+        return {"color": "RED", "reason": "No prediction data available."}
+    
+    score = 0  # -10 to +10 scale
+    reasons = []
+    
+    # 1. Direction confidence
+    confidence = 0.0
+    direction = "SIDEWAYS"
+    tree = pred.get("tree_prediction")
+    ensemble = pred.get("ensemble_prediction")
+    
+    if ensemble:
+        confidence = ensemble.get("confidence", 0.5) * 100
+        direction = ensemble.get("direction", "SIDEWAYS")
+    elif tree:
+        confidence = tree.get("confidence", 0.5) * 100
+        direction = tree.get("direction", "SIDEWAYS")
+    
+    if confidence > 65:
+        score += 3
+        reasons.append(f"Strong confidence: {confidence:.0f}%")
+    elif confidence > 50:
+        score += 1
+        reasons.append(f"Moderate confidence: {confidence:.0f}%")
+    else:
+        score -= 2
+        reasons.append(f"Low confidence: {confidence:.0f}%")
+    
+    # 2. VIX level
+    vix = pred.get("vix_value", 15.0) or 15.0
+    if vix < 15:
+        score += 2
+        reasons.append(f"Low VIX ({vix:.1f}) — calm market")
+    elif vix < 20:
+        score += 1
+        reasons.append(f"Normal VIX ({vix:.1f})")
+    elif vix < 25:
+        score -= 1
+        reasons.append(f"Elevated VIX ({vix:.1f}) — caution")
+    else:
+        score -= 3
+        reasons.append(f"High VIX ({vix:.1f}) — dangerous conditions")
+    
+    # 3. Regime alignment
+    regime = pred.get("regime", "CHOPPY")
+    if regime == "TRENDING" and direction != "SIDEWAYS":
+        score += 2
+        reasons.append(f"Trending regime — directional bet supported")
+    elif regime == "VOLATILE":
+        score -= 2
+        reasons.append(f"Volatile regime — unpredictable")
+    elif regime == "CHOPPY":
+        score -= 1
+        reasons.append(f"Choppy regime — whipsaws possible")
+    
+    # 4. Whipsaw check
+    whipsaw = pred.get("whipsaw")
+    if whipsaw and whipsaw.get("is_whipsaw"):
+        score -= 2
+        reasons.append("⚠️ Whipsaw detected — conflicting signals")
+    
+    # 5. PCR support
+    pcr = pred.get("pcr", 1.0)
+    if pcr and pcr > 1.2:
+        score += 1
+        reasons.append(f"Bullish PCR ({pcr:.2f}) — support from options data")
+    elif pcr and pcr < 0.7:
+        score += 1
+        reasons.append(f"Bearish PCR ({pcr:.2f}) — options confirm bearishness")
+    
+    # Determine color
+    if score >= 4:
+        color = "GREEN"
+    elif score >= 0:
+        color = "YELLOW"
+    else:
+        color = "RED"
+    
+    return {
+        "color": color,
+        "score": score,
+        "direction": direction,
+        "confidence": confidence,
+        "reasons": reasons,
+    }
+
+
+def recommend_strategy(pred):
+    """
+    Recommend the best options strategy based on current market conditions.
+    
+    Returns:
+        dict with: strategy, reasoning, risk_level, direction
+    """
+    if pred is None or not pred.get("success"):
+        return {
+            "strategy": "NO TRADE",
+            "reasoning": "No prediction data available.",
+            "risk_level": "UNKNOWN",
+            "direction": "NONE",
+        }
+    
+    direction = "SIDEWAYS"
+    confidence = 50.0
+    tree = pred.get("tree_prediction")
+    ensemble = pred.get("ensemble_prediction")
+    
+    if ensemble:
+        direction = ensemble.get("direction", "SIDEWAYS")
+        confidence = ensemble.get("confidence", 0.5) * 100
+    elif tree:
+        direction = tree.get("direction", "SIDEWAYS")
+        confidence = tree.get("confidence", 0.5) * 100
+    
+    vix = pred.get("vix_value", 15.0) or 15.0
+    regime = pred.get("regime", "CHOPPY")
+    high_vix = vix > 18
+    
+    # Strategy selection matrix
+    if direction == "UP":
+        if high_vix:
+            strategy = "Bull Put Spread (Credit)"
+            reasoning = (
+                f"Market predicted UP ({confidence:.0f}% confidence). "
+                f"VIX is elevated ({vix:.1f}), so SELL premium with a Bull Put Spread. "
+                f"Theta works in your favor. You profit if NIFTY stays above the sold strike."
+            )
+            risk_level = "MODERATE"
+        else:
+            strategy = "Bull Call Spread (Debit)"
+            reasoning = (
+                f"Market predicted UP ({confidence:.0f}% confidence). "
+                f"VIX is low ({vix:.1f}), so options are cheap — BUY a Bull Call Spread. "
+                f"Lower cost entry with defined risk."
+            )
+            risk_level = "LOW"
+    
+    elif direction == "DOWN":
+        if high_vix:
+            strategy = "Bear Call Spread (Credit)"
+            reasoning = (
+                f"Market predicted DOWN ({confidence:.0f}% confidence). "
+                f"VIX elevated ({vix:.1f}) — SELL premium with a Bear Call Spread. "
+                f"You profit if NIFTY stays below the sold strike."
+            )
+            risk_level = "MODERATE"
+        else:
+            strategy = "Bear Put Spread (Debit)"
+            reasoning = (
+                f"Market predicted DOWN ({confidence:.0f}% confidence). "
+                f"VIX is low ({vix:.1f}) — BUY a Bear Put Spread for cheap directional exposure."
+            )
+            risk_level = "LOW"
+    
+    else:  # SIDEWAYS
+        strategy = "Iron Condor (Credit)"
+        reasoning = (
+            f"Market predicted SIDEWAYS ({confidence:.0f}% confidence). "
+            f"Sell both sides with an Iron Condor. "
+            f"You profit if NIFTY stays within the range. Time decay is your friend."
+        )
+        risk_level = "LOW" if vix < 15 else "MODERATE"
+    
+    return {
+        "strategy": strategy,
+        "reasoning": reasoning,
+        "risk_level": risk_level,
+        "direction": direction,
+    }
+
+
+def generate_morning_briefing(pred):
+    """
+    Combine all signals into a single morning briefing summary.
+    
+    Returns:
+        dict with all the info needed for the Command Center
+    """
+    traffic = compute_traffic_light(pred)
+    strategy = recommend_strategy(pred)
+    
+    briefing = {
+        "date": datetime.now().strftime("%A, %b %d %Y"),
+        "traffic_light": traffic,
+        "strategy": strategy,
+        "regime": pred.get("regime", "UNKNOWN") if pred else "UNKNOWN",
+        "spot_price": pred.get("spot_price", 0) if pred else 0,
+        "vix": pred.get("vix_value", 0) if pred else 0,
+        "pcr": pred.get("pcr", 0) if pred else 0,
+        "supports": [],
+        "resistances": [],
+        "signal_summary": "",
+    }
+    
+    if pred and pred.get("success"):
+        briefing["supports"] = pred.get("supports", [])
+        briefing["resistances"] = pred.get("resistances", [])
+        
+        # Build human-readable summary
+        color_emoji = {"GREEN": "🟢", "YELLOW": "🟡", "RED": "🔴"}.get(traffic["color"], "⚪")
+        briefing["signal_summary"] = (
+            f"{color_emoji} Signal: {traffic['color']} | "
+            f"Regime: {briefing['regime']} | "
+            f"Strategy: {strategy['strategy']}"
+        )
+    else:
+        briefing["signal_summary"] = "⚠️ No prediction data. Run Fetch + Predict first."
+    
+    return briefing
+
 
 if __name__ == "__main__":
     print("=" * 60)

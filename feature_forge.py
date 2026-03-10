@@ -7,6 +7,8 @@ Clean, leak-free feature engineering pipeline.
 
 import pandas as pd
 import numpy as np
+from datetime import datetime, timedelta
+import os
 
 # pandas_ta removed (not used in core math)
 from utils import DIRECTION_THRESHOLD, UP, DOWN, SIDEWAYS
@@ -162,9 +164,24 @@ def engineer_features(df, target_horizon=1):
     # ═══════════════════════════════════════════════════════════════════════
     df["day_of_week"] = df["date"].dt.dayofweek / 4.0  # Mon=0, Fri=1
     df["month"] = df["date"].dt.month / 12.0
-    df["is_expiry_week"] = ((df["date"].dt.dayofweek == 3) | 
-                            (df["date"].dt.dayofweek == 2) | 
-                            (df["date"].dt.dayofweek == 4)).astype(int)
+    # is_expiry_week: The week containing the last Thursday of the month
+    def is_last_thursday_week(dt):
+        # Find the last day of the month
+        last_day = dt.replace(day=28) + timedelta(days=4)
+        last_day = last_day - timedelta(days=last_day.day)
+        
+        # Find the last Thursday
+        # weekday(): Mon=0, Tue=1, Wed=2, Thu=3, Fri=4, Sat=5, Sun=6
+        offset = (last_day.weekday() - 3) % 7
+        last_thursday = last_day - timedelta(days=offset)
+        
+        # Check if the current date is in the same week as the last Thursday
+        # (Using Monday of the week as the anchor)
+        target_monday = last_thursday - timedelta(days=last_thursday.weekday())
+        current_monday = dt - timedelta(days=dt.weekday())
+        return 1 if target_monday == current_monday else 0
+
+    df["is_expiry_week"] = df["date"].apply(is_last_thursday_week)
     
     # ═══════════════════════════════════════════════════════════════════════
     # 9. VOLUME FEATURES (2 features)

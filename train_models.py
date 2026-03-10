@@ -16,9 +16,6 @@ from feature_forge import engineer_features
 from models.ensemble_classifier import EnsembleClassifier
 from models.regime_detector import RegimeDetector
 from models.range_predictor import RangePredictor
-from models.lstm_classifier import LSTMClassifier
-
-
 def classify_regime(row):
     adx = row.get('adx', 20)
     vol = row.get('realized_vol_20', 0.15)
@@ -38,28 +35,28 @@ def train_all():
     df, features = engineer_features(df_raw)
 
     # 2. Train default ensemble
-    print("\n[1/5] Training Ensemble Classifier...")
+    print("\n[1/4] Training Ensemble Classifier...")
     ensemble = EnsembleClassifier()
     ensemble.train(df, features)
     ensemble.save()
     print("  ✅ Ensemble saved")
 
     # 3. Train regime detector
-    print("\n[2/5] Training Regime Detector...")
+    print("\n[2/4] Training Regime Detector...")
     regime = RegimeDetector()
     regime.train(df)
     regime.save()
     print("  ✅ Regime Detector saved")
 
     # 4. Train range predictor
-    print("\n[3/5] Training Range Predictor...")
+    print("\n[3/4] Training Range Predictor...")
     range_pred = RangePredictor()
     range_pred.train(df, features)
     range_pred.save()
     print("  ✅ Range Predictor saved")
 
     # 5. Train regime-specific models (for the routing logic)
-    print("\n[4/5] Training Regime-Specific Ensembles...")
+    print("\n[4/4] Training Regime-Specific Ensembles...")
     import joblib
     from utils import MODEL_DIR
     regime_models = {}
@@ -74,13 +71,6 @@ def train_all():
     
     joblib.dump(regime_models, os.path.join(MODEL_DIR, "regime_models.pkl"))
     print("  ✅ Regime models saved")
-
-    # 6. Train LSTM
-    print("\n[5/5] Training LSTM Sequence Model...")
-    lstm = LSTMClassifier(seq_len=10, hidden_size=64, num_layers=2, lr=0.001, epochs=80, batch_size=64)
-    lstm.train(df, features, verbose=True)
-    lstm.save()
-    print("  ✅ LSTM saved")
 
     print("\n" + "=" * 60)
     print("  ALL MODELS TRAINED AND SAVED ✅")

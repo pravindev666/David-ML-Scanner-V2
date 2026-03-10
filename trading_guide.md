@@ -1,7 +1,7 @@
 # 📊 David Oracle — Options Trading Guide
 
 > For **Bull Spreads, Bear Spreads, and Short Iron Condor** traders.
-> Based on David v2.0 Hybrid Architecture (Regime Trees + LSTM).
+> Based on David v2.1 Regime-Aware Architecture (XGBoost + LightGBM + CatBoost).
 
 ---
 
@@ -39,7 +39,7 @@ David gives you 3 key signals. Here's what they mean and how to act:
 ### Why Dashboard Says SIDEWAYS But Forecast Shows UP
 
 This is **not a bug** — they come from two completely different models:
-- **Verdict**: Comes from the Hybrid AI (XGBoost + LSTM averaged). It classifies direction.
+- **Verdict**: Comes from the Regime-Specific Ensemble (XGBoost + LightGBM + CatBoost). It classifies direction.
 - **Price Forecast**: Comes from the Range Predictor (Quantile Regression). It projects price.
 
 When confidence is low (37%), the Verdict says "SIDEWAYS" (uncertain), but the Range Predictor's median path still tilts slightly upward because historically, MILD BULLISH regimes drift up.
