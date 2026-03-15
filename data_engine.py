@@ -19,13 +19,13 @@ try:
 except ImportError:
     raise ImportError("yfinance is required. Install with: pip install yfinance")
 
+from utils import DATA_DIR, NIFTY_SYMBOL, VIX_SYMBOL, SP500_SYMBOL, DATA_START_YEAR, C
+
 try:
     from nsepython import nse_fiidii
 except ImportError:
     nse_fiidii = None
     print(f"  {C.YELLOW}[WARN] nsepython not installed. Sentiment features will be limited.{C.RESET}")
-
-from utils import DATA_DIR, NIFTY_SYMBOL, VIX_SYMBOL, SP500_SYMBOL, DATA_START_YEAR, C
 
 
 def _csv_path(name):
@@ -57,7 +57,8 @@ def fetch_symbol(symbol, name, start_year=DATA_START_YEAR):
     
     existing_df = None
     if os.path.exists(csv_path):
-        existing_df = pd.read_csv(csv_path, parse_dates=["date"])
+        existing_df = pd.read_csv(csv_path)
+        existing_df["date"] = pd.to_datetime(existing_df["date"], errors='coerce')
         last_date = existing_df["date"].max()
         # Only fetch from last date onward
         start_date = (last_date - timedelta(days=5)).strftime("%Y-%m-%d")
@@ -131,7 +132,11 @@ def fetch_symbol(symbol, name, start_year=DATA_START_YEAR):
         fallback = _v3_fallback_path(name)
         if fallback:
             print(f"  {C.CYAN}[FALLBACK] Using v3 CSV: {fallback}{C.RESET}")
-            df = pd.read_csv(fallback, parse_dates=["date"] if "date" in pd.read_csv(fallback, nrows=1).columns else [0])
+            df = pd.read_csv(fallback)
+            if "date" in df.columns:
+                df["date"] = pd.to_datetime(df["date"], errors='coerce')
+            else:
+                df.iloc[:, 0] = pd.to_datetime(df.iloc[:, 0], errors='coerce')
             df.columns = [c.lower().replace(" ", "_") for c in df.columns]
             if df.columns[0] != "date":
                 df = df.rename(columns={df.columns[0]: "date"})
@@ -233,13 +238,19 @@ def fetch_sentiment_data(live=True):
                 
                 if pe_oi == 0 and ce_oi == 0:
                     pcr_val = 1.0  # Safe fallback if NSE returns empty option chain
+                    total_oi = 0
                 else:
                     pcr_val = pe_oi / max(1, ce_oi)
+                    total_oi = pe_oi + ce_oi
                 
                 today_iso = datetime.now().strftime("%Y-%m-%d")
-                new_row = pd.DataFrame([{"date": today_iso, "pcr": round(pcr_val, 3)}])
+                new_row = pd.DataFrame([{"date": today_iso, "pcr": round(pcr_val, 3), "total_oi": total_oi}])
                 
                 if df_pcr is not None:
+                    # Ensure total_oi exists in existing df
+                    if "total_oi" not in df_pcr.columns:
+                        df_pcr["total_oi"] = 0
+                    
                     # Drop if exists, append new
                     df_pcr = df_pcr[df_pcr["date"] != new_row["date"].iloc[0]]
                     df_pcr = pd.concat([df_pcr, new_row], ignore_index=True)
@@ -247,7 +258,7 @@ def fetch_sentiment_data(live=True):
                     df_pcr = new_row
                     
                 df_pcr.to_csv(pcr_path, index=False)
-                print(f"  {C.GREEN}[OK] PCR updated: {pcr_val:.3f}{C.RESET}")
+                print(f"  {C.GREEN}[OK] PCR updated: {pcr_val:.3f} | OI: {total_oi}{C.RESET}")
         except Exception as e:
             print(f"  {C.CYAN}[FALLBACK] Live PCR timeout ({e}), using daily cache{C.RESET}")
         
@@ -279,19 +290,22 @@ def load_all_data(live_sentiment=True):
         sp500_path = _csv_path("sp500")
         
         if os.path.exists(nifty_path):
-            nifty = pd.read_csv(nifty_path, parse_dates=["date"])
+            nifty = pd.read_csv(nifty_path)
+            nifty["date"] = pd.to_datetime(nifty["date"], errors='coerce')
             print(f"  {C.GREEN}[OK] nifty: {len(nifty)} rows from cache{C.RESET}")
         else:
             raise RuntimeError("No cached nifty data found. Run GitHub Action first.")
             
         if os.path.exists(vix_path):
-            vix = pd.read_csv(vix_path, parse_dates=["date"])
+            vix = pd.read_csv(vix_path)
+            vix["date"] = pd.to_datetime(vix["date"], errors='coerce')
             print(f"  {C.GREEN}[OK] vix: {len(vix)} rows from cache{C.RESET}")
         else:
             raise RuntimeError("No cached vix data found. Run GitHub Action first.")
             
         if os.path.exists(sp500_path):
-            sp500 = pd.read_csv(sp500_path, parse_dates=["date"])
+            sp500 = pd.read_csv(sp500_path)
+            sp500["date"] = pd.to_datetime(sp500["date"], errors='coerce')
             print(f"  {C.GREEN}[OK] sp500: {len(sp500)} rows from cache{C.RESET}")
         else:
             raise RuntimeError("No cached sp500 data found. Run GitHub Action first.")
@@ -321,12 +335,14 @@ def load_all_data(live_sentiment=True):
         df_pcr["date"] = pd.to_datetime(df_pcr["date"])
         df = df.merge(df_pcr, on="date", how="left")
         df["pcr"] = df["pcr"].ffill().fillna(1.0)
+        df["total_oi"] = df["total_oi"].ffill().fillna(0)
     else:
         df["pcr"] = 1.0
+        df["total_oi"] = 0
     
-    # Forward-fill VIX and S&P (they may have different trading calendars)
-    df["vix"] = df["vix"].ffill().bfill()
-    df["sp_close"] = df["sp_close"].ffill().bfill()
+    # Forward-fill VIX and S&P, then fill deeply missing priors with defaults
+    df["vix"] = df["vix"].ffill().fillna(15.0)
+    df["sp_close"] = df["sp_close"].ffill().fillna(method='bfill') # Still backfill SP to avoid huge dropoffs, but VIX is safer fixed at 15
     
     # Sort and clean
     df = df.sort_values("date").reset_index(drop=True)

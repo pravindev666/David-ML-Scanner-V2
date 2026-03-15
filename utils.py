@@ -35,6 +35,7 @@ sklearn.utils.validation.check_array = _patched_check_array
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 MODEL_DIR = os.path.join(BASE_DIR, "saved_models")
+WAR_ROOM_PATH = os.path.join(BASE_DIR, "war_room_settings.json")
 
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(MODEL_DIR, exist_ok=True)

@@ -60,12 +60,12 @@ class WhipsawDetector:
         }
         
         # ─── Signal 3: ATR Expansion/Contraction ─────────────────────────
-        atr_ratio = latest.get("atr_ratio", 0.01)
-        atr_mean = df["atr_ratio"].tail(50).mean() if "atr_ratio" in df.columns else atr_ratio
-        atr_expanding = atr_ratio > atr_mean * 1.3
+        atr_val = latest.get("atr_14", 0.01)
+        atr_mean = df["atr_14"].tail(50).mean() if "atr_14" in df.columns else atr_val
+        atr_expanding = atr_val > atr_mean * 1.3
         
         signals["atr_volatility"] = {
-            "value": float(atr_ratio / atr_mean) if atr_mean > 0 else 1.0,
+            "value": float(atr_val / atr_mean) if atr_mean > 0 else 1.0,
             "signal": "EXPANDING (reversal risk)" if atr_expanding else "Normal",
             "weight": 0.6 if atr_expanding else 0.0,
         }

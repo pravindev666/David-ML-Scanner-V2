@@ -46,9 +46,8 @@ class RegimeDetector:
         self.transition_matrix = None
         self.is_trained = False
         self.hmm_features = [
-            "returns_1d", "returns_5d", "realized_vol_20",
-            "rsi_14", "macd_hist", "bb_position",
-            "dist_sma_20", "dist_sma_50", "adx"
+            "returns_1d", "realized_vol_10", "vol_of_vol",
+            "rsi_7", "bb_width", "adx", "vix_percentile"
         ]
     
     def train(self, df, verbose=True):

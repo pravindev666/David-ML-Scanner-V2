@@ -44,6 +44,19 @@ import numpy as np
 import david_desktop as backend
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# 1. MATPLOTLIB CANVAS HELPER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class MplCanvas(FigureCanvas):
+    def __init__(self, parent=None, width=5, height=4, dpi=100):
+        # Use DARK_CARD to match the application aesthetic
+        fig = Figure(figsize=(width, height), dpi=dpi, facecolor="#151A22")
+        self.axes = fig.add_subplot(111)
+        self.axes.set_facecolor("#151A22")
+        super(MplCanvas, self).__init__(fig)
+        self.setParent(parent)
+        
+# ═══════════════════════════════════════════════════════════════════════════════
 # STYLE CONSTANTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -311,7 +324,6 @@ class DavidOracleWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tab_dashboard = self._build_dashboard_tab()
         self.tab_forecast = self._build_forecast_tab()
-        self.tab_strategy = self._build_strategy_tab()
         self.tab_intraday = self._build_intraday_tab()
         self.tab_inspector = self._build_inspector_tab()
         
@@ -319,13 +331,14 @@ class DavidOracleWindow(QMainWindow):
         self.tabs.addTab(self._build_command_center_tab(), "🚦 Command Center")
         self.tabs.addTab(self.tab_forecast, "📈 Forecast")
         self.tabs.addTab(self.tab_intraday, "⚡ Intraday ML")
-        self.tabs.addTab(self.tab_strategy, "🧪 Strategy Lab")
         self.tabs.addTab(self._build_position_manager_tab(), "🛡️ Position Manager")
-        self.tabs.addTab(self._build_trade_recommendations_tab(), "💡 Trade Recommendations")
         self.tabs.addTab(self._build_price_action_tab(), "📉 Price Action")
         self.tabs.addTab(self._build_war_room_tab(), "⚔️ War Room")
-        self.tabs.addTab(self._build_weekly_report_tab(), "📊 Weekly Report")
         self.tabs.addTab(self.tab_inspector, "📋 Data Inspector")
+        self.tabs.addTab(self._build_tactical_war_room_tab(), "⚔️ Tactical War Room")
+        self.tabs.addTab(self._build_strike_recommender_tab(), "🎯 Strike Builder")
+        self.tabs.addTab(self._build_theta_decay_tab(), "⏱️ Theta Timer")
+        self.tabs.addTab(self._build_vix_gauge_tab(), "📈 VIX Gauge")
         self.tabs.addTab(self._build_codex_tab(), "📖 David Codex")
         
         # Log console
@@ -437,21 +450,14 @@ class DavidOracleWindow(QMainWindow):
         layout.addWidget(separator3)
         
         # Mini data inspector
-        inspector_title = QLabel("📁 Data Status")
+        inspector_title = QLabel("📁 Data Check")
         inspector_title.setStyleSheet(f"color: {ACCENT_CYAN}; font-size: 12px; font-weight: bold; border: none;")
         layout.addWidget(inspector_title)
         
-        self.mini_inspector = QTableWidget(5, 2)
-        self.mini_inspector.setHorizontalHeaderLabels(["Data", "Latest"])
-        self.mini_inspector.horizontalHeader().setStretchLastSection(True)
-        self.mini_inspector.verticalHeader().setVisible(False)
-        self.mini_inspector.setMaximumHeight(170)
-        self.mini_inspector.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.mini_inspector.setStyleSheet(f"""
-            QTableWidget {{ border: none; background-color: transparent; }}
-            QTableWidget::item {{ padding: 3px; font-size: 11px; }}
-        """)
-        layout.addWidget(self.mini_inspector)
+        self.data_status_label = QLabel("⚪ Checking data...")
+        self.data_status_label.setStyleSheet(f"color: {TEXT_DIM}; font-size: 11px; border: none;")
+        self.data_status_label.setWordWrap(True)
+        layout.addWidget(self.data_status_label)
         
         # Model status indicator
         self.model_status_label = QLabel("⚪ Models: Checking...")
@@ -527,71 +533,45 @@ class DavidOracleWindow(QMainWindow):
         title.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 20px; font-weight: bold;")
         layout.addWidget(title)
         
-        # Row 1: Verdict | Regime | Whipsaw
+        # Row 1: The Verdict & Confidence (Massive Card)
         row1 = QHBoxLayout()
-        
-        self.card_verdict = MetricCard("VERDICT", "—", ACCENT_GREEN)
-        self.card_regime = MetricCard("REGIME", "—", ACCENT_CYAN)
-        self.card_whipsaw = MetricCard("WHIPSAW", "—", ACCENT_GOLD)
-        self.card_confidence = MetricCard("CONFIDENCE", "—", TEXT_PRIMARY)
-        
+        self.card_verdict = MetricCard("DAVID'S VERDICT", "—", ACCENT_GREEN)
+        self.card_verdict.title_label.setStyleSheet(f"color: {ACCENT_CYAN}; font-size: 14px; font-weight: bold;")
+        self.card_verdict.setMinimumHeight(140)
         row1.addWidget(self.card_verdict)
-        row1.addWidget(self.card_regime)
-        row1.addWidget(self.card_whipsaw)
-        row1.addWidget(self.card_confidence)
         layout.addLayout(row1)
         
-        # Row 2: Ensemble | Intraday prediction 
+        # Row 2: ELI5 Market Context
+        context_title = QLabel("📊 Core Market Drivers")
+        context_title.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 16px; font-weight: bold; margin-top: 15px;")
+        layout.addWidget(context_title)
+        
+        layout_miro = QHBoxLayout()
+        layout_miro.setSpacing(15)
+        
+        self.card_oi_change = MetricCard("💰 BIG MONEY FLOW", "—", ACCENT_CYAN)
+        self.card_oi_change.setToolTip("1-Day change in Open Interest. High values indicate 'Big Money' entering.")
+        layout_miro.addWidget(self.card_oi_change)
+        
+        self.card_buildup = MetricCard("🏗️ TREND POWER", "—", TEXT_SEC)
+        self.card_buildup.setToolTip("Price and OI interaction. Long Build-Up = Bullish, Short Build-Up = Bearish.")
+        layout_miro.addWidget(self.card_buildup)
+        
+        self.card_poc = MetricCard("🎯 RUBBER BAND EFFECT", "—", ACCENT_GOLD)
+        self.card_poc.setToolTip("Distance to Volume Point of Control (20d). Near 0% means price is at its fairer value.")
+        layout_miro.addWidget(self.card_poc)
+        
+        layout.addLayout(layout_miro)
+        
+        # Row 3: Daily vs Intraday Quick Look
         row2 = QHBoxLayout()
-        
-        self.card_tree = MetricCard("📊 DAILY ENSEMBLE", "—", TEXT_PRIMARY)
-        self.card_intraday_dash = MetricCard("⚡ 15-MIN INTRADAY", "—", TEXT_PRIMARY)
-        
+        self.card_tree = MetricCard("Daily Expected Move", "—", TEXT_PRIMARY)
+        self.card_intraday_dash = MetricCard("Next 15m Momentum", "—", TEXT_PRIMARY)
+        self.card_regime = MetricCard("Market Personality", "—", ACCENT_GOLD)
         row2.addWidget(self.card_tree)
         row2.addWidget(self.card_intraday_dash)
+        row2.addWidget(self.card_regime)
         layout.addLayout(row2)
-        
-        # Row 3: Market Sentiment
-        sentiment_title = QLabel("📊 Market Sentiment")
-        sentiment_title.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 16px; font-weight: bold;")
-        layout.addWidget(sentiment_title)
-        
-        row3 = QHBoxLayout()
-        self.card_pcr = MetricCard("PUT-CALL RATIO", "—", ACCENT_CYAN)
-        self.card_fii = MetricCard("FII NET (Cr)", "—", ACCENT_GREEN)
-        self.card_dii = MetricCard("DII NET (Cr)", "—", ACCENT_GOLD)
-        
-        row3.addWidget(self.card_pcr)
-        row3.addWidget(self.card_fii)
-        row3.addWidget(self.card_dii)
-        layout.addLayout(row3)
-        
-        # Row 4: Support & Resistance
-        sr_title = QLabel("📍 Support & Resistance")
-        sr_title.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 16px; font-weight: bold;")
-        layout.addWidget(sr_title)
-        
-        row4 = QHBoxLayout()
-        
-        self.res_tiles = []
-        res_group = QGroupBox("Resistance (Above - Wait for Rejections)")
-        res_layout = QHBoxLayout(res_group)
-        for _ in range(3):
-            tile = self._create_sr_tile()
-            self.res_tiles.append(tile)
-            res_layout.addWidget(tile)
-        
-        self.support_tiles = []
-        sup_group = QGroupBox("Support (Below - Wait for Bounces)")
-        sup_layout = QHBoxLayout(sup_group)
-        for _ in range(3):
-            tile = self._create_sr_tile()
-            self.support_tiles.append(tile)
-            sup_layout.addWidget(tile)
-        
-        row4.addWidget(res_group)
-        row4.addWidget(sup_group)
-        layout.addLayout(row4)
         
         # Placeholder message
         self.dashboard_placeholder = QLabel("Press 🔴 Fetch Spot + Predict (F5) to see the full dashboard")
@@ -651,76 +631,6 @@ class DavidOracleWindow(QMainWindow):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(12, 12, 12, 12)
-        
-        title = QLabel("🧪 Strategy Lab")
-        title.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 20px; font-weight: bold;")
-        layout.addWidget(title)
-        
-        # Iron Condor section
-        condor_group = QGroupBox("🛡️ Iron Condor Analyzer")
-        condor_layout = QGridLayout(condor_group)
-        
-        condor_layout.addWidget(QLabel("Strike Price:"), 0, 0)
-        self.strike_input = QSpinBox()
-        self.strike_input.setRange(10000, 50000)
-        self.strike_input.setSingleStep(100)
-        self.strike_input.setValue(25000)
-        condor_layout.addWidget(self.strike_input, 0, 1)
-        
-        condor_layout.addWidget(QLabel("Days:"), 0, 2)
-        self.days_input = QSpinBox()
-        self.days_input.setRange(1, 30)
-        self.days_input.setValue(5)
-        condor_layout.addWidget(self.days_input, 0, 3)
-        
-        self.btn_analyze = QPushButton("Analyze Strike")
-        self.btn_analyze.clicked.connect(self.on_analyze_strike)
-        condor_layout.addWidget(self.btn_analyze, 0, 4)
-        
-        # Results
-        condor_results = QHBoxLayout()
-        self.card_touch_prob = MetricCard("Touch Prob", "—", ACCENT_RED)
-        self.card_recovery = MetricCard("Recovery", "—", ACCENT_GREEN)
-        self.card_firefight = MetricCard("Firefight Level", "—", ACCENT_GOLD)
-        condor_results.addWidget(self.card_touch_prob)
-        condor_results.addWidget(self.card_recovery)
-        condor_results.addWidget(self.card_firefight)
-        condor_layout.addLayout(condor_results, 1, 0, 1, 5)
-        
-        self.condor_verdict = QLabel("")
-        self.condor_verdict.setAlignment(Qt.AlignCenter)
-        self.condor_verdict.setStyleSheet(f"font-size: 14px; font-weight: bold;")
-        condor_layout.addWidget(self.condor_verdict, 2, 0, 1, 5)
-        
-        layout.addWidget(condor_group)
-        
-        # Bounce Calculator
-        bounce_group = QGroupBox("🔄 Bounce-Back Calculator")
-        bounce_layout = QGridLayout(bounce_group)
-        
-        bounce_layout.addWidget(QLabel("Target Price:"), 0, 0)
-        self.target_input = QSpinBox()
-        self.target_input.setRange(10000, 50000)
-        self.target_input.setSingleStep(100)
-        self.target_input.setValue(23000)
-        bounce_layout.addWidget(self.target_input, 0, 1)
-        
-        self.btn_bounce = QPushButton("Check Bounce")
-        self.btn_bounce.clicked.connect(self.on_check_bounce)
-        bounce_layout.addWidget(self.btn_bounce, 0, 2)
-        
-        self.bounce_table = QTableWidget(0, 3)
-        self.bounce_table.setHorizontalHeaderLabels(["Days", "Recovery %", "Avg Recovery Days"])
-        self.bounce_table.horizontalHeader().setStretchLastSection(True)
-        self.bounce_table.verticalHeader().setVisible(False)
-        self.bounce_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.bounce_table.setMaximumHeight(150)
-        bounce_layout.addWidget(self.bounce_table, 1, 0, 1, 3)
-        
-        layout.addWidget(bounce_group)
-        layout.addStretch()
-        return tab
-    
     # ─────────────────────────────────────────────────────────────────────────
     # TAB 4: DATA INSPECTOR
     # ─────────────────────────────────────────────────────────────────────────
@@ -758,6 +668,17 @@ class DavidOracleWindow(QMainWindow):
         model_layout.addWidget(self.model_table)
         layout.addWidget(model_group)
         
+        # Feature Status Table
+        feat_group = QGroupBox("🏗️ Institutional Feature Verification")
+        feat_layout = QVBoxLayout(feat_group)
+        self.feat_table = QTableWidget(5, 3)
+        self.feat_table.setHorizontalHeaderLabels(["Feature", "Latest Value", "Status"])
+        self.feat_table.horizontalHeader().setStretchLastSection(True)
+        self.feat_table.verticalHeader().setVisible(False)
+        self.feat_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        feat_layout.addWidget(self.feat_table)
+        layout.addWidget(feat_group)
+        
         # Refresh button
         btn_refresh = QPushButton("🔄 Refresh Inspector")
         btn_refresh.clicked.connect(self.refresh_data_inspector)
@@ -765,6 +686,1087 @@ class DavidOracleWindow(QMainWindow):
         
         layout.addStretch()
         return tab
+
+    def _build_tactical_war_room_tab(self):
+        tab = QWidget()
+        main_layout = QVBoxLayout(tab)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Wrap everything in a scroll area so nothing gets squashed
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(f"QScrollArea {{ border: none; background-color: {DARK_BG}; }}")
+        
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(18)
+        
+        title = QLabel("⚔️ Tactical War Room")
+        title.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 24px; font-weight: bold;")
+        layout.addWidget(title)
+        
+        desc = QLabel("Dynamic strategy-specific advice based on live ML predictions.")
+        desc.setStyleSheet(f"color: {TEXT_DIM}; font-size: 14px;")
+        layout.addWidget(desc)
+
+        # ─── David's Morning Brief ───
+        brief_group = QGroupBox("📢 David's Morning Brief")
+        brief_inner = QVBoxLayout(brief_group)
+        self.morning_brief_text = QLabel("Good morning! Market is waking up... Click 'Fetch Spot' for your vibe check.")
+        self.morning_brief_text.setWordWrap(True)
+        self.morning_brief_text.setStyleSheet(f"font-size: 14px; color: {TEXT_PRIMARY}; padding: 8px;")
+        brief_inner.addWidget(self.morning_brief_text)
+        layout.addWidget(brief_group)
+        
+        # ─── Strategy Selector ───
+        selector_group = QGroupBox("Select Your Strategy")
+        selector_layout = QHBoxLayout(selector_group)
+        
+        self.tactical_strategy = QComboBox()
+        self.tactical_strategy.addItems([
+            "Bull Credit Spread (Put Spread)",
+            "Bear Credit Spread (Call Spread)",
+            "Iron Condor (Non-Directional)"
+        ])
+        self.tactical_strategy.currentIndexChanged.connect(self._on_tactical_strategy_changed)
+        selector_layout.addWidget(self.tactical_strategy)
+        
+        selector_layout.addWidget(QLabel("Entry Price (Opt):"))
+        self.tactical_entry_price = QLineEdit()
+        self.tactical_entry_price.setPlaceholderText("e.g. 24200")
+        self.tactical_entry_price.setMaximumWidth(100)
+        self.tactical_entry_price.textChanged.connect(self._on_tactical_strategy_changed)
+        selector_layout.addWidget(self.tactical_entry_price)
+        
+        layout.addWidget(selector_group)
+
+        # ─── "What-If" Recovery Simulator ───
+        sim_group = QGroupBox("🔮 What-If Recovery Simulator")
+        sim_layout = QVBoxLayout(sim_group)
+        
+        sim_top = QHBoxLayout()
+        sim_top.addWidget(QLabel("Simulated NIFTY Price:"))
+        self.sim_price_label = QLabel("Current Spot")
+        self.sim_price_label.setStyleSheet(f"color: {ACCENT_CYAN}; font-weight: bold;")
+        sim_top.addWidget(self.sim_price_label)
+        sim_layout.addLayout(sim_top)
+        
+        self.what_if_slider = QSlider(Qt.Horizontal)
+        self.what_if_slider.setRange(-1000, 1000)
+        self.what_if_slider.setValue(0)
+        self.what_if_slider.setTickPosition(QSlider.TicksBelow)
+        self.what_if_slider.setTickInterval(200)
+        self.what_if_slider.valueChanged.connect(self._on_tactical_strategy_changed)
+        sim_layout.addWidget(self.what_if_slider)
+        
+        layout.addWidget(sim_group)
+        
+        # ─── Advice Card ───
+        self.tactical_card = QFrame()
+        self.tactical_card.setMinimumHeight(120)
+        self.tactical_card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {DARK_CARD};
+                border: 2px solid {DARK_BORDER};
+                border-radius: 12px;
+                padding: 15px;
+            }}
+        """)
+        card_layout = QVBoxLayout(self.tactical_card)
+        
+        self.tactical_title = QLabel("No Prediction Yet")
+        self.tactical_title.setStyleSheet("font-size: 18px; font-weight: bold; color: white;")
+        card_layout.addWidget(self.tactical_title)
+        
+        self.tactical_text = QLabel("Press 'Fetch Spot' to see high-probability trade setups.")
+        self.tactical_text.setWordWrap(True)
+        self.tactical_text.setStyleSheet(f"font-size: 14px; color: {TEXT_SEC}; margin-top: 8px;")
+        card_layout.addWidget(self.tactical_text)
+        
+        # Risk Meter
+        risk_layout = QHBoxLayout()
+        risk_layout.addWidget(QLabel("Strategy Risk:"))
+        self.tactical_risk_bar = QProgressBar()
+        self.tactical_risk_bar.setRange(0, 100)
+        self.tactical_risk_bar.setValue(0)
+        risk_layout.addWidget(self.tactical_risk_bar)
+        card_layout.addLayout(risk_layout)
+        
+        layout.addWidget(self.tactical_card)
+
+        # ─── Plotting Area ───
+        charts_group = QGroupBox("📊 AI Recovery Logic — Visual Proof")
+        charts_inner = QVBoxLayout(charts_group)
+        charts_row = QHBoxLayout()
+        
+        self.hist_canvas = MplCanvas(self, width=5, height=3, dpi=100)
+        self.hist_canvas.setMinimumHeight(250)
+        self.ai_canvas = MplCanvas(self, width=5, height=3, dpi=100)
+        self.ai_canvas.setMinimumHeight(250)
+        
+        charts_row.addWidget(self.hist_canvas)
+        charts_row.addWidget(self.ai_canvas)
+        charts_inner.addLayout(charts_row)
+        
+        layout.addWidget(charts_group)
+
+        # ─── Traffic Light Portfolio Scanner ───
+        port_group = QGroupBox("🚦 Live Portfolio Intelligence")
+        port_layout = QVBoxLayout(port_group)
+        
+        self.portfolio_table = QTableWidget(0, 4)
+        self.portfolio_table.setHorizontalHeaderLabels(["ID", "Strategy", "Verdict", "AI Insight"])
+        self.portfolio_table.horizontalHeader().setStretchLastSection(True)
+        self.portfolio_table.verticalHeader().setVisible(False)
+        self.portfolio_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.portfolio_table.setStyleSheet(f"background-color: {DARK_BG}; border: none;")
+        self.portfolio_table.setMinimumHeight(100)
+        port_layout.addWidget(self.portfolio_table)
+        
+        layout.addWidget(port_group)
+        
+        # ─── SECTION: Historical Twin Days ───
+        twin_group = QGroupBox("👯 Today Looks Like... (Historical Twins)")
+        twin_layout = QVBoxLayout(twin_group)
+        
+        self.twin_table = QTableWidget(0, 3)
+        self.twin_table.setHorizontalHeaderLabels(["Date", "Matching VIX", "3-Day Move %"])
+        self.twin_table.horizontalHeader().setStretchLastSection(True)
+        self.twin_table.verticalHeader().setVisible(False)
+        self.twin_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.twin_table.setMinimumHeight(120)
+        self.twin_table.setStyleSheet(f"background-color: {DARK_BG}; border: none;")
+        twin_layout.addWidget(self.twin_table)
+        
+        self.twin_summary = QLabel("Matches found based on VIX and Regime personality.")
+        self.twin_summary.setStyleSheet(f"color: {TEXT_DIM}; font-size: 12px; padding: 5px;")
+        twin_layout.addWidget(self.twin_summary)
+        
+        layout.addWidget(twin_group)
+        
+        layout.addStretch()
+        
+        scroll.setWidget(content)
+        main_layout.addWidget(scroll)
+        
+        # Store morning brief card reference for styling (no longer a QFrame directly)
+        self.morning_brief_card = brief_group
+        
+        return tab
+
+
+    def _on_tactical_strategy_changed(self):
+        if hasattr(self, 'prediction'):
+            self._update_tactical_war_room(self.prediction)
+
+    def _update_tactical_war_room(self, result):
+        strategy_map = {
+            0: "bull_credit",
+            1: "bear_credit",
+            2: "iron_condor"
+        }
+        st_idx = self.tactical_strategy.currentIndex()
+        st_type = strategy_map.get(st_idx, "iron_condor")
+        
+        entry_price = None
+        try:
+            val = self.tactical_entry_price.text().strip()
+            if val:
+                entry_price = float(val)
+        except ValueError:
+            pass
+
+        # Handle Simulator
+        sim_offset = self.what_if_slider.value()
+        spot = result.get("spot_price", 24000)
+        active_price = spot + sim_offset
+        if sim_offset == 0:
+            self.sim_price_label.setText(f"LIVE SPOT: {spot:,.0f}")
+        else:
+            self.sim_price_label.setText(f"SIMULATED: {active_price:,.0f} ({sim_offset:+} pts)")
+
+        advice = backend.get_tactical_advice(result, st_type, entry_price=entry_price, simulated_price=active_price)
+        
+        # Update Morning Brief
+        self.morning_brief_text.setText(backend.get_morning_brief(result))
+
+        # Update Twin Days
+        try:
+            current_vix = result.get("vix_value", 15)
+            current_regime = result.get("regime", "CHOPPY")
+            current_spot = result.get("spot_price", 24000)
+            df_raw = result.get("df_raw")
+            
+            twins = backend.find_twin_days(df_raw, current_vix, current_regime, current_spot)
+            self.twin_table.setRowCount(len(twins))
+            if twins:
+                up_count = sum(1 for t in twins if t['move'] > 0)
+                bias = "BULLISH" if up_count > 2 else "BEARISH" if up_count < 1 else "NEUTRAL"
+                bias_color = ACCENT_GREEN if bias == "BULLISH" else ACCENT_RED if bias == "BEARISH" else ACCENT_GOLD
+                
+                for i, t in enumerate(twins):
+                    self.twin_table.setItem(i, 0, QTableWidgetItem(t['date']))
+                    self.twin_table.setItem(i, 1, QTableWidgetItem(f"{t['vix']:.2f}"))
+                    
+                    move_item = QTableWidgetItem(f"{t['move']:+.2f}%")
+                    move_item.setForeground(QColor(ACCENT_GREEN if t['move'] > 0 else ACCENT_RED))
+                    self.twin_table.setItem(i, 2, move_item)
+                
+                self.twin_summary.setText(f"🔍 Found {len(twins)} matching days. Historical Bias: {bias}")
+                self.twin_summary.setStyleSheet(f"color: {bias_color}; font-size: 12px; font-weight: bold; padding: 5px;")
+            else:
+                self.twin_summary.setText("No close historical twins found for these exact conditions.")
+                self.twin_summary.setStyleSheet(f"color: {TEXT_DIM}; font-size: 12px; padding: 5px;")
+        except Exception as e:
+            print(f"Update Twin UI Error: {e}")
+
+        # Update Portfolio Scanner
+        self._update_portfolio_scanner(result)
+        
+        self.tactical_title.setText(f"{advice['emoji']} {advice['title']}")
+        self.tactical_title.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {advice['color']};")
+        self.tactical_text.setText(advice['text'])
+        self.tactical_risk_bar.setValue(advice['risk'])
+        
+        # Update Charts if available
+        if 'charts' in advice:
+            self._update_tactical_charts(advice['charts'])
+        else:
+            self.hist_canvas.axes.cla()
+            self.ai_canvas.axes.cla()
+            self.hist_canvas.draw()
+            self.ai_canvas.draw()
+        
+        # Color the progress bar based on risk
+        if advice['risk'] < 30:
+            color = ACCENT_GREEN
+        elif advice['risk'] < 60:
+            color = ACCENT_GOLD
+        else:
+            color = ACCENT_RED
+            
+        self.tactical_risk_bar.setStyleSheet(f"""
+            QProgressBar::chunk {{ background-color: {color}; border-radius: 2px; }}
+            QProgressBar {{ border: 1px solid {DARK_BORDER}; border-radius: 4px; background-color: {DARK_BG}; text-align: center; }}
+        """)
+        
+        self.tactical_card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {DARK_CARD};
+                border: 2px solid {advice['color']};
+                border-radius: 12px;
+                padding: 20px;
+            }}
+        """)
+
+    def _update_portfolio_scanner(self, result):
+        """Update the traffic light portfolio table."""
+        statuses = backend.get_portfolio_status(result)
+        self.portfolio_table.setRowCount(len(statuses))
+        
+        for i, s in enumerate(statuses):
+            self.portfolio_table.setItem(i, 0, QTableWidgetItem(str(s['id'])))
+            self.portfolio_table.setItem(i, 1, QTableWidgetItem(s['strategy']))
+            
+            verdict_item = QTableWidgetItem(s['status'])
+            verdict_item.setForeground(QColor(s['color']))
+            verdict_item.setFont(QFont("Arial", 10, QFont.Bold))
+            self.portfolio_table.setItem(i, 2, verdict_item)
+            
+            self.portfolio_table.setItem(i, 3, QTableWidgetItem(s['message']))
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # TAB: STRIKE RECOMMENDER
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def _build_strike_recommender_tab(self):
+        tab = QWidget()
+        from PyQt5.QtWidgets import QSpinBox, QHBoxLayout
+        main_layout = QVBoxLayout(tab)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(f"QScrollArea {{ border: none; background-color: {DARK_BG}; }}")
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        title = QLabel("🎯 AI Strike Recommender")
+        title.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 24px; font-weight: bold;")
+        layout.addWidget(title)
+        desc = QLabel("David uses predicted range + support/resistance to suggest exact strike prices.")
+        desc.setStyleSheet(f"color: {TEXT_DIM}; font-size: 14px;")
+        layout.addWidget(desc)
+        
+        # ─── SECTION: David's Conviction Score (Feature 7) ───
+        conviction_row = QHBoxLayout()
+        self.conv_card = QFrame()
+        self.conv_card.setMinimumHeight(130)
+        self.conv_card.setStyleSheet(f"background-color: {DARK_CARD}; border: 2px solid {DARK_BORDER}; border-radius: 12px;")
+        conv_lay = QHBoxLayout(self.conv_card)
+        
+        # Score & Grade
+        score_box = QVBoxLayout()
+        self.lbl_conv_score = QLabel("—")
+        self.lbl_conv_score.setStyleSheet(f"font-size: 54px; font-weight: bold; color: {TEXT_PRIMARY};")
+        self.lbl_conv_score.setAlignment(Qt.AlignCenter)
+        self.lbl_conv_grade = QLabel("GRADE: —")
+        self.lbl_conv_grade.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {TEXT_DIM};")
+        self.lbl_conv_grade.setAlignment(Qt.AlignCenter)
+        score_box.addWidget(self.lbl_conv_score)
+        score_box.addWidget(self.lbl_conv_grade)
+        conv_lay.addLayout(score_box, 1)
+        
+        # Verification Signals
+        signals_box = QVBoxLayout()
+        self.lbl_conv_signals_title = QLabel("🛡️ TRUST VERIFICATION SIGNALS")
+        self.lbl_conv_signals_title.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {ACCENT_CYAN};")
+        self.lbl_conv_signals = QLabel("Strike recommender not yet active.")
+        self.lbl_conv_signals.setStyleSheet(f"font-size: 13px; color: {TEXT_SEC};")
+        self.lbl_conv_signals.setWordWrap(True)
+        signals_box.addWidget(self.lbl_conv_signals_title)
+        signals_box.addWidget(self.lbl_conv_signals)
+        conv_lay.addLayout(signals_box, 3)
+        
+        # Final Verdict
+        verdict_box = QVBoxLayout()
+        self.lbl_conv_verdict = QLabel("AWAITING DATA")
+        self.lbl_conv_verdict.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {TEXT_DIM};")
+        self.lbl_conv_verdict.setWordWrap(True)
+        self.lbl_conv_verdict.setAlignment(Qt.AlignCenter)
+        verdict_box.addWidget(self.lbl_conv_verdict)
+        conv_lay.addLayout(verdict_box, 2)
+        
+        conviction_row.addWidget(self.conv_card)
+        layout.addLayout(conviction_row)
+
+        # Context card
+        self.strike_context = QLabel("Click 'Fetch Spot' to generate strike recommendations...")
+        self.strike_context.setWordWrap(True)
+        self.strike_context.setStyleSheet(f"font-size: 14px; color: {TEXT_PRIMARY}; padding: 10px; background-color: {DARK_CARD}; border: 1px solid {ACCENT_CYAN}; border-radius: 8px;")
+        layout.addWidget(self.strike_context)
+        
+        # Capital Input Card
+        cap_layout = QHBoxLayout()
+        cap_label = QLabel("💰 Account Capital (₹):")
+        cap_label.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 14px; font-weight: bold;")
+        self.capital_spinbox = QSpinBox()
+        self.capital_spinbox.setRange(50000, 10000000)
+        self.capital_spinbox.setValue(200000)
+        self.capital_spinbox.setSingleStep(50000)
+        self.capital_spinbox.setStyleSheet(f"background-color: {DARK_BG}; color: {TEXT_PRIMARY}; font-size: 14px; padding: 5px; border: 1px solid {TEXT_DIM};")
+        cap_layout.addWidget(cap_label)
+        cap_layout.addWidget(self.capital_spinbox)
+        
+        # Mode Toggle: Conservative / Aggressive
+        mode_label = QLabel("   ⚙️ Mode:")
+        mode_label.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 14px; font-weight: bold;")
+        self.mode_toggle = QComboBox()
+        self.mode_toggle.addItems(["🛡️ Conservative (Safe)", "⚡ Aggressive (Full)"])
+        self.mode_toggle.setCurrentIndex(0)  # Default to Conservative
+        self.mode_toggle.setStyleSheet(f"background-color: {DARK_BG}; color: {TEXT_PRIMARY}; font-size: 14px; padding: 5px; border: 1px solid {TEXT_DIM}; min-width: 200px;")
+        cap_layout.addWidget(mode_label)
+        cap_layout.addWidget(self.mode_toggle)
+        cap_layout.addStretch()
+        layout.addLayout(cap_layout)
+        
+        # Traffic Light (Conservative Mode)
+        self.traffic_light_label = QLabel("")
+        self.traffic_light_label.setAlignment(Qt.AlignCenter)
+        self.traffic_light_label.setStyleSheet(f"font-size: 28px; font-weight: bold; padding: 15px; border-radius: 12px; background-color: {DARK_CARD}; margin: 5px 0;")
+        self.traffic_light_label.setVisible(False)
+        layout.addWidget(self.traffic_light_label)
+        
+        # Monthly target (Conservative Mode)
+        self.monthly_target_label = QLabel("")
+        self.monthly_target_label.setWordWrap(True)
+        self.monthly_target_label.setStyleSheet(f"font-size: 14px; color: {ACCENT_CYAN}; padding: 8px; background-color: {DARK_CARD}; border: 1px solid {ACCENT_CYAN}; border-radius: 8px;")
+        self.monthly_target_label.setVisible(False)
+        layout.addWidget(self.monthly_target_label)
+
+        # Recommendations table
+        rec_group = QGroupBox("📋 Recommended Strikes")
+        rec_layout = QVBoxLayout(rec_group)
+        self.strike_table = QTableWidget(0, 9)
+        self.strike_table.setHorizontalHeaderLabels(["Strategy", "Sell Leg", "Buy Leg", "Expiry", "Safety", "Trust Score", "P&L/Lot", "Reason / Proof", "Action"])
+        self.strike_table.horizontalHeader().setStretchLastSection(True)
+        self.strike_table.verticalHeader().setVisible(False)
+        self.strike_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.strike_table.setMinimumHeight(180)
+        rec_layout.addWidget(self.strike_table)
+        layout.addWidget(rec_group)
+        
+        # Playbook Group
+        playbook_group = QGroupBox("🧠 AI Execution Playbook")
+        playbook_layout = QVBoxLayout(playbook_group)
+        playbook_layout.setSpacing(10)
+        
+        self.pb_sizing = QLabel("⚖️ SIZING: -")
+        self.pb_sizing.setWordWrap(True)
+        self.pb_sizing.setStyleSheet(f"color: #FFD700; font-size: 14px; font-weight: bold;")
+        
+        self.pb_entry = QLabel("🟢 ENTRY: -")
+        self.pb_entry.setWordWrap(True)
+        self.pb_entry.setStyleSheet(f"color: {ACCENT_CYAN}; font-size: 14px;")
+        
+        self.pb_target = QLabel("🎯 TARGET: -")
+        self.pb_target.setWordWrap(True)
+        self.pb_target.setStyleSheet(f"color: #00FF7F; font-size: 14px;")
+        
+        self.pb_stop = QLabel("🛑 STOP LOSS: -")
+        self.pb_stop.setWordWrap(True)
+        self.pb_stop.setStyleSheet(f"color: #FF4B4B; font-size: 14px;")
+        
+        self.pb_fire = QLabel("🔥 FIREFIGHTING: -")
+        self.pb_fire.setWordWrap(True)
+        self.pb_fire.setStyleSheet(f"color: #FFD700; font-size: 14px;")
+        
+        self.pb_streak = QLabel("📈 STREAK: -")
+        self.pb_streak.setWordWrap(True)
+        self.pb_streak.setStyleSheet(f"color: {ACCENT_CYAN}; font-size: 13px;")
+        
+        self.pb_fii = QLabel("🌊 FII/DII: -")
+        self.pb_fii.setWordWrap(True)
+        self.pb_fii.setStyleSheet(f"color: {ACCENT_CYAN}; font-size: 13px;")
+        
+        self.pb_event = QLabel("📅 EVENT SHIELD: -")
+        self.pb_event.setWordWrap(True)
+        self.pb_event.setStyleSheet(f"color: {ACCENT_CYAN}; font-size: 13px;")
+        
+        playbook_layout.addWidget(self.pb_sizing)
+        playbook_layout.addWidget(self.pb_entry)
+        playbook_layout.addWidget(self.pb_target)
+        playbook_layout.addWidget(self.pb_stop)
+        playbook_layout.addWidget(self.pb_fire)
+        playbook_layout.addWidget(self.pb_streak)
+        playbook_layout.addWidget(self.pb_fii)
+        playbook_layout.addWidget(self.pb_event)
+        
+        layout.addWidget(playbook_group)
+        
+        # What-If Simulator Group
+        whatif_group = QGroupBox("🎛️ What-If Price Simulator")
+        whatif_layout = QVBoxLayout(whatif_group)
+        whatif_layout.setSpacing(10)
+        
+        self.wi_slider = QSlider(Qt.Horizontal)
+        self.wi_slider.setMinimum(15000)
+        self.wi_slider.setMaximum(25000)
+        self.wi_slider.setValue(22000)
+        self.wi_slider.setTickPosition(QSlider.TicksBelow)
+        self.wi_slider.setTickInterval(500)
+        
+        self.wi_price_label = QLabel("Simulated NIFTY: 22,000")
+        self.wi_price_label.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 16px; font-weight: bold;")
+        
+        self.wi_pnl_label = QLabel("Est. Expiry P&L: -")
+        self.wi_pnl_label.setStyleSheet(f"color: {TEXT_DIM}; font-size: 15px;")
+        
+        self.wi_prob_label = QLabel("Probability: -")
+        self.wi_prob_label.setStyleSheet(f"color: {TEXT_DIM}; font-size: 13px;")
+        
+        whatif_layout.addWidget(self.wi_price_label)
+        whatif_layout.addWidget(self.wi_slider)
+        whatif_layout.addWidget(self.wi_pnl_label)
+        whatif_layout.addWidget(self.wi_prob_label)
+        
+        # We need state to calculate this properly on demand
+        self.current_recommendations = []
+        self.current_spot = 22000
+        self.current_df_raw = None
+        
+        self.wi_slider.valueChanged.connect(self._on_whatif_slider_changed)
+        
+        layout.addWidget(whatif_group)
+
+        layout.addStretch()
+        scroll.setWidget(content)
+        main_layout.addWidget(scroll)
+        return tab
+
+    def _update_strike_recommender(self, result):
+        capital = getattr(self, "capital_spinbox", None)
+        cap_val = capital.value() if capital else 500000
+        
+        # Get mode from toggle
+        mode_idx = self.mode_toggle.currentIndex() if hasattr(self, "mode_toggle") else 0
+        mode = "conservative" if mode_idx == 0 else "aggressive"
+        
+        data = backend.get_strike_recommendation(result, cap_val, mode)
+        if not data.get("ready"):
+            self.strike_context.setText(data.get("message", "No data."))
+            return
+        
+        # Conservative mode: show traffic light
+        is_conservative = data.get("mode") == "conservative"
+        self.traffic_light_label.setVisible(is_conservative)
+        self.monthly_target_label.setVisible(is_conservative)
+        
+        if is_conservative:
+            traffic = data.get("traffic_light", "WAIT")
+            if traffic == "ENTER":
+                self.traffic_light_label.setText("🟢  ENTER — Conditions Met. Place the Trade.")
+                self.traffic_light_label.setStyleSheet(f"font-size: 22px; font-weight: bold; padding: 15px; border-radius: 12px; background-color: #0a2e0a; color: #00FF7F; border: 2px solid #00FF7F; margin: 5px 0;")
+            else:
+                block_text = " | ".join(data.get("block_reasons", ["Conditions not met."]))
+                self.traffic_light_label.setText(f"🔴  WAIT — {block_text}")
+                self.traffic_light_label.setStyleSheet(f"font-size: 18px; font-weight: bold; padding: 15px; border-radius: 12px; background-color: #2e0a0a; color: #FF4B4B; border: 2px solid #FF4B4B; margin: 5px 0;")
+            
+            # Monthly target
+            meta = data.get("conservative_meta", {})
+            monthly_text = data.get("playbook", {}).get("monthly_target", "")
+            if monthly_text:
+                self.monthly_target_label.setText(monthly_text)
+            
+        vix = data.get("vix", 0)
+        chop_prob = data.get("whipsaw_prob", 0)
+        chop_warn = f" | ⚠️ Chop Risk: {chop_prob}%" if chop_prob > 50 else ""
+        
+        self.strike_context.setText(
+            f"📍 Spot: {data['spot']:,.0f}  |  "
+            f"Direction: {data['direction']} ({data['confidence']:.0f}%)  |  "
+            f"7d Range: {data['range_low']:,.0f} — {data['range_high']:,.0f}  |  "
+            f"VIX: {vix:.2f}{chop_warn}\n"
+            f"Support: {data['nearest_support']:,.0f}  |  Resistance: {data['nearest_resistance']:,.0f}"
+        )
+        
+        # State bindings for What-If
+        self.current_spot = data.get('spot', 22000)
+        self.current_recommendations = data.get("recommendations", [])
+        self.current_df_raw = data.get("df_raw")
+        
+        # Update slider constraints and value
+        self.wi_slider.blockSignals(True)
+        self.wi_slider.setMinimum(int(self.current_spot * 0.9))
+        self.wi_slider.setMaximum(int(self.current_spot * 1.1))
+        self.wi_slider.setValue(int(self.current_spot))
+        self.wi_slider.blockSignals(False)
+        self._on_whatif_slider_changed(self.wi_slider.value())
+        
+        # Update Conviction Score (Feature 7)
+        conv = data.get("conviction", {})
+        if conv:
+            self.lbl_conv_score.setText(str(conv.get('score', '—')))
+            self.lbl_conv_score.setStyleSheet(f"font-size: 54px; font-weight: bold; color: {conv.get('color', TEXT_PRIMARY)};")
+            self.lbl_conv_grade.setText(f"GRADE: {conv.get('grade', '—')}")
+            self.lbl_conv_verdict.setText(conv.get('verdict', 'UNKNOWN'))
+            self.lbl_conv_verdict.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {conv.get('color', TEXT_PRIMARY)};")
+            
+            signals_text = " • " + "\n • ".join(conv.get('signals', []))
+            self.lbl_conv_signals.setText(signals_text)
+            self.conv_card.setStyleSheet(f"background-color: {DARK_CARD}; border: 2px solid {conv.get('color', DARK_BORDER)}; border-radius: 12px;")
+        
+        recs = self.current_recommendations
+        self.strike_table.setRowCount(len(recs))
+        for i, r in enumerate(recs):
+            self.strike_table.setItem(i, 0, QTableWidgetItem(r["strategy"]))
+            self.strike_table.setItem(i, 1, QTableWidgetItem(r["sell"]))
+            self.strike_table.setItem(i, 2, QTableWidgetItem(r["buy"]))
+            self.strike_table.setItem(i, 3, QTableWidgetItem(r.get("expiry", "14-30 Days")))
+            
+            safety = r["safety"]
+            safety_item = QTableWidgetItem(safety)
+            if safety == "HIGH": color = "#00FF7F"
+            elif safety == "MEDIUM": color = "#FFD700"
+            elif safety == "LOW": color = "#FF8C00"
+            else: color = "#FF4B4B"
+                
+            safety_item.setForeground(QColor(color))
+            safety_item.setFont(QFont("Arial", 10, QFont.Bold))
+            self.strike_table.setItem(i, 4, safety_item)
+            
+            # Trust Score / Win Rate column
+            trust = r.get("trust_score")
+            if trust is not None:
+                trust_text = f"{trust:.0f}%"
+                trust_color = r.get("color", "#FFD700")
+            else:
+                raw_wr = r.get("win_rate")
+                trust_text = f"{raw_wr:.0f}%" if raw_wr is not None else "-"
+                trust_color = "#00FF7F" if raw_wr and raw_wr >= 85 else ("#FFD700" if raw_wr and raw_wr >= 70 else "#FF4B4B")
+                
+            trust_item = QTableWidgetItem(trust_text)
+            trust_item.setForeground(QColor(trust_color))
+            trust_item.setFont(QFont("Arial", 10, QFont.Bold))
+            
+            # Put the detailed Prove It text in tooltip
+            proof_text = r.get("pattern_proof_text", "")
+            tooltip_parts = []
+            if proof_text:
+                tooltip_parts.append(proof_text)
+            if r.get("sample_size"):
+                tooltip_parts.append(f"Sample Size: {r['sample_size']} similar setups")
+            if r.get("mae_rupees"):
+                tooltip_parts.append(f"Avg Worst Dip (MAE): -₹{r['mae_rupees']:,.0f}/lot")
+                
+            if tooltip_parts:
+                trust_item.setToolTip("\n".join(tooltip_parts))
+                
+            self.strike_table.setItem(i, 5, trust_item)
+            
+            # P&L per lot column
+            est_profit = r.get("est_profit", 0)
+            est_loss = r.get("est_loss", 0)
+            est_rr = r.get("est_rr", 0)
+            pnl_text = f"₹{est_profit:,.0f}" if est_profit else "-"
+            pnl_item = QTableWidgetItem(pnl_text)
+            pnl_color = ACCENT_GREEN if est_profit > 2000 else ACCENT_GOLD if est_profit > 1000 else ACCENT_RED
+            pnl_item.setForeground(QColor(pnl_color))
+            pnl_item.setFont(QFont("Arial", 10, QFont.Bold))
+            pnl_item.setToolTip(f"Max Profit: ₹{est_profit:,.0f}/lot\nMax Loss: ₹{-est_loss:,.0f}/lot\nRR Ratio: 1:{1/est_rr:.1f}" if est_rr > 0 else "")
+            self.strike_table.setItem(i, 6, pnl_item)
+            
+            # Put the survival text into reason
+            reason_item = QTableWidgetItem(r["reason"])
+            if tooltip_parts:
+                reason_item.setToolTip("\n".join(tooltip_parts))
+            self.strike_table.setItem(i, 7, reason_item)
+            
+            # Action Button: Save to Journal
+            save_btn = QPushButton("💾 Save")
+            save_btn.setStyleSheet(f"background-color: {ACCENT_CYAN}; color: {DARK_BG}; font-weight: bold; padding: 3px; border-radius: 4px;")
+            strategy_name = f"{r['strategy']} ({r['sell']})"
+            signal_color = safety
+            predicted_dir = data.get("direction", "SIDEWAYS")
+            
+            save_btn.clicked.connect(lambda checked, s=strategy_name, sig=signal_color, p=predicted_dir: self._on_save_to_journal(s, sig, p))
+            self.strike_table.setCellWidget(i, 8, save_btn)
+            
+            # Highlight ⭐ primary row
+            if "⭐" in r["strategy"]:
+                for col in range(9):
+                    item = self.strike_table.item(i, col)
+                    if item:
+                        item.setBackground(QColor("#1a3a2a"))  # Subtle dark green highlight
+            
+        # Update Playbook UI
+        pb = data.get("playbook", {})
+        self.pb_sizing.setText(f"⚖️ SIZING: {pb.get('sizing', '-')}")
+        self.pb_entry.setText(f"🟢 ENTRY: {pb.get('entry', '-')}")
+        self.pb_target.setText(f"🎯 TARGET: {pb.get('take_profit', '-')}")
+        self.pb_stop.setText(f"🛑 STOP LOSS: {pb.get('stop_loss', '-')}")
+        
+        fire_text = f"🔥 FIREFIGHTING: {pb.get('firefighting', '-')}"
+        if chop_prob > 50:
+            self.pb_fire.setStyleSheet(f"color: #FF4B4B; font-size: 14px; font-weight: bold;")
+        else:
+            self.pb_fire.setStyleSheet(f"color: #FFD700; font-size: 14px;")
+        self.pb_fire.setText(fire_text)
+        
+        # Intelligence Suite UI
+        self.pb_streak.setText(f"📈 STREAK: {pb.get('streak', '-')}")
+        self.pb_fii.setText(f"🌊 FII/DII: {pb.get('fii_flow', '-')}")
+        
+        event_text = pb.get('event_shield', '-')
+        self.pb_event.setText(f"📅 EVENT SHIELD: {event_text}")
+        if 'EXPIRY DAY' in str(event_text) or 'BUDGET' in str(event_text):
+            self.pb_event.setStyleSheet(f"color: #FF4B4B; font-size: 13px; font-weight: bold;")
+        else:
+            self.pb_event.setStyleSheet(f"color: {ACCENT_CYAN}; font-size: 13px;")
+            
+        # Draw the Adjustment Ladder
+        # Ensure we have the UI container for it
+        if not hasattr(self, "ladder_layout"):
+            self.ladder_group = QGroupBox("🪜 Adjustment Ladder (If it goes wrong)")
+            self.ladder_layout = QVBoxLayout(self.ladder_group)
+            self.ladder_layout.setSpacing(5)
+            # Find the layout that holds playbook_group and add ladder below it
+            # We must reach in safely. As a hack, we can insert it into the scroll area content.
+            content_layout = self.pb_sizing.parentWidget().parentWidget().layout()
+            # It's at the end, before the stretch
+            content_layout.insertWidget(content_layout.count() - 1, self.ladder_group)
+            
+        # Clear existing ladder
+        while self.ladder_layout.count():
+            item = self.ladder_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+                
+        ladder_data = pb.get("adjustment_ladder", [])
+        if not ladder_data:
+            lbl = QLabel("No adjustment ladder available for this strategy.")
+            lbl.setStyleSheet(f"color: {TEXT_DIM};")
+            self.ladder_layout.addWidget(lbl)
+        else:
+            for step in ladder_data:
+                lbl = QLabel(f"{step['level']} → {step['action']}: {step['detail']}")
+                lbl.setWordWrap(True)
+                lbl.setStyleSheet(f"color: {step.get('color', '#A0AEC0')}; font-size: 13px; padding: 2px;")
+                self.ladder_layout.addWidget(lbl)
+
+    def _on_save_to_journal(self, strategy, signal, predicted):
+        """Handler for the 'Save to Journal' button."""
+        # Map safety to traffic light colors if needed
+        color_map = {
+            "HIGH": "GREEN",
+            "MEDIUM": "YELLOW",
+            "LOW": "RED",
+            "WARNING": "RED"
+        }
+        journal_signal = color_map.get(signal, "YELLOW")
+        
+        success = backend.save_to_journal(strategy, journal_signal, predicted, notes="Logged from Strike Recommender")
+        if success:
+            QMessageBox.information(self, "Journal Updated", f"Successfully saved {strategy} to your trade journal!")
+        else:
+            QMessageBox.critical(self, "Error", "Failed to save trade to journal.")
+
+    def _on_whatif_slider_changed(self, value):
+        self.wi_price_label.setText(f"Simulated NIFTY: {value:,.0f}")
+        
+        if not hasattr(self, "current_recommendations") or not self.current_recommendations:
+            self.wi_pnl_label.setText("Est. Expiry P&L: -")
+            self.wi_prob_label.setText("Probability: -")
+            return
+            
+        try:
+            # For simplicity, we just simulate the first recommended strategy
+            rec = self.current_recommendations[0]
+            strategy = rec["strategy"]
+            sell_st = float(rec["sell"].split()[1])
+            buy_st = float(rec["buy"].split()[1])
+            
+            # Use actual estimated premium from the recommendation
+            premium = rec.get("est_premium", 100)
+            pnl_data = backend.whatif_pnl(sell_st, buy_st, strategy, premium, self.current_spot, value, lots=1)
+            
+            pnl = pnl_data["pnl"]
+            zone = pnl_data["zone"]
+            
+            pnl_text = f"Est. Expiry P&L: ₹{pnl:,.0f}"
+            if zone == "SAFE":
+                self.wi_pnl_label.setStyleSheet(f"color: #00FF7F; font-size: 15px; font-weight: bold;")
+            elif zone == "WARNING":
+                self.wi_pnl_label.setStyleSheet(f"color: #FFD700; font-size: 15px; font-weight: bold;")
+            else:
+                self.wi_pnl_label.setStyleSheet(f"color: #FF4B4B; font-size: 15px; font-weight: bold;")
+            self.wi_pnl_label.setText(pnl_text)
+            
+            if hasattr(self, "current_df_raw") and self.current_df_raw is not None:
+                prob_data = backend.whatif_probability(self.current_df_raw, self.current_spot, value, days=7)
+                prob = prob_data["probability"]
+                self.wi_prob_label.setText(f"Probability of hitting {value}: {prob:.1f}%")
+        except Exception as e:
+            print(f"Slider err: {e}")
+            pass
+
+
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # TAB: THETA DECAY TIMER
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def _build_theta_decay_tab(self):
+        tab = QWidget()
+        main_layout = QVBoxLayout(tab)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(f"QScrollArea {{ border: none; background-color: {DARK_BG}; }}")
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        title = QLabel("⏱️ Theta Decay Timer")
+        title.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 24px; font-weight: bold;")
+        layout.addWidget(title)
+        desc = QLabel("Track how premium decays over time. Find your sweet-spot exit day.")
+        desc.setStyleSheet(f"color: {TEXT_DIM}; font-size: 14px;")
+        layout.addWidget(desc)
+
+        # Inputs
+        input_group = QGroupBox("📅 Your Trade Dates")
+        input_layout = QHBoxLayout(input_group)
+
+        input_layout.addWidget(QLabel("Entry Date:"))
+        self.theta_entry_date = QLineEdit()
+        self.theta_entry_date.setPlaceholderText("YYYY-MM-DD")
+        self.theta_entry_date.setMaximumWidth(130)
+        input_layout.addWidget(self.theta_entry_date)
+
+        input_layout.addWidget(QLabel("Expiry Date:"))
+        self.theta_expiry_date = QLineEdit()
+        self.theta_expiry_date.setPlaceholderText("YYYY-MM-DD")
+        self.theta_expiry_date.setMaximumWidth(130)
+        input_layout.addWidget(self.theta_expiry_date)
+
+        input_layout.addWidget(QLabel("Premium (₹):"))
+        self.theta_premium = QLineEdit()
+        self.theta_premium.setPlaceholderText("100")
+        self.theta_premium.setMaximumWidth(80)
+        input_layout.addWidget(self.theta_premium)
+
+        btn_calc = QPushButton("⚡ Calculate")
+        btn_calc.clicked.connect(self._on_theta_calculate)
+        input_layout.addWidget(btn_calc)
+
+        layout.addWidget(input_group)
+
+        # Summary
+        self.theta_summary = QLabel("Enter your trade dates above and click Calculate.")
+        self.theta_summary.setWordWrap(True)
+        self.theta_summary.setStyleSheet(f"font-size: 14px; color: {TEXT_PRIMARY}; padding: 10px; background-color: {DARK_CARD}; border-radius: 8px;")
+        layout.addWidget(self.theta_summary)
+
+        # Theta chart
+        chart_group = QGroupBox("📊 Premium Decay Curve")
+        chart_layout = QVBoxLayout(chart_group)
+        self.theta_canvas = MplCanvas(self, width=8, height=4, dpi=100)
+        self.theta_canvas.setMinimumHeight(300)
+        chart_layout.addWidget(self.theta_canvas)
+        layout.addWidget(chart_group)
+
+        layout.addStretch()
+        scroll.setWidget(content)
+        main_layout.addWidget(scroll)
+        return tab
+
+    def _on_theta_calculate(self):
+        entry = self.theta_entry_date.text().strip()
+        expiry = self.theta_expiry_date.text().strip()
+        premium = self.theta_premium.text().strip() or "100"
+        try:
+            prem = float(premium)
+        except ValueError:
+            prem = 100
+        data = backend.get_theta_decay_info(entry, expiry, prem)
+        if not data.get("ready"):
+            self.theta_summary.setText(data.get("message", "Invalid input."))
+            return
+        self.theta_summary.setText(data["message"])
+        # Plot decay curve
+        curve = data.get("decay_curve", [])
+        days = [p["day"] for p in curve]
+        remaining = [p["premium_remaining"] for p in curve]
+        ax = self.theta_canvas.axes
+        ax.cla()
+        ax.fill_between(days, remaining, alpha=0.3, color="#00CED1")
+        ax.plot(days, remaining, color="#00CED1", linewidth=2)
+        ax.axvline(x=data["sweet_spot_day"], color="#FFD700", linestyle="--", label=f"Sweet Spot (Day {data['sweet_spot_day']})")
+        if data["days_held"] <= data["total_days"]:
+            ax.axvline(x=data["days_held"], color="#FF4B4B", linestyle="--", label=f"TODAY (Day {data['days_held']})")
+        ax.set_xlabel("Days Since Entry", color="white")
+        ax.set_ylabel("Premium Remaining (₹)", color="white")
+        ax.set_title("Theta Decay Curve", color="white", fontweight="bold")
+        ax.legend(facecolor="#1a1a2e", edgecolor="white", labelcolor="white")
+        ax.set_facecolor("#1a1a2e")
+        ax.tick_params(colors="white")
+        self.theta_canvas.draw()
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # TAB: VIX PREMIUM GAUGE
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def _build_vix_gauge_tab(self):
+        tab = QWidget()
+        main_layout = QVBoxLayout(tab)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(f"QScrollArea {{ border: none; background-color: {DARK_BG}; }}")
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        title = QLabel("📈 VIX Premium Gauge")
+        title.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 24px; font-weight: bold;")
+        layout.addWidget(title)
+        desc = QLabel("Is today a good day to sell credit spreads? VIX tells you how fat the premiums are.")
+        desc.setStyleSheet(f"color: {TEXT_DIM}; font-size: 14px;")
+        layout.addWidget(desc)
+
+        # VIX Level Card
+        self.vix_level_card = QFrame()
+        self.vix_level_card.setMinimumHeight(120)
+        self.vix_level_card.setStyleSheet(f"background-color: {DARK_CARD}; border: 2px solid {DARK_BORDER}; border-radius: 12px; padding: 15px;")
+        vix_card_layout = QVBoxLayout(self.vix_level_card)
+        self.vix_level_label = QLabel("VIX: --")
+        self.vix_level_label.setStyleSheet("font-size: 28px; font-weight: bold; color: white;")
+        vix_card_layout.addWidget(self.vix_level_label)
+        self.vix_quality_label = QLabel("Premium Quality: --")
+        self.vix_quality_label.setStyleSheet(f"font-size: 16px; color: {TEXT_SEC};")
+        vix_card_layout.addWidget(self.vix_quality_label)
+        self.vix_advice_label = QLabel("Click 'Fetch Spot' to check VIX levels...")
+        self.vix_advice_label.setWordWrap(True)
+        self.vix_advice_label.setStyleSheet(f"font-size: 14px; color: {TEXT_PRIMARY}; margin-top: 8px;")
+        vix_card_layout.addWidget(self.vix_advice_label)
+        layout.addWidget(self.vix_level_card)
+
+        # VIX Scale visual
+        scale_group = QGroupBox("🌡️ Premium Fatness Meter")
+        scale_layout = QVBoxLayout(scale_group)
+        self.vix_meter = QProgressBar()
+        self.vix_meter.setRange(0, 100)
+        self.vix_meter.setValue(0)
+        self.vix_meter.setMinimumHeight(30)
+        self.vix_meter.setStyleSheet(f"""
+            QProgressBar::chunk {{ background-color: {ACCENT_CYAN}; border-radius: 4px; }}
+            QProgressBar {{ border: 1px solid {DARK_BORDER}; border-radius: 6px; background-color: {DARK_BG}; text-align: center; font-size: 14px; font-weight: bold; color: white; }}
+        """)
+        scale_layout.addWidget(self.vix_meter)
+        scale_labels = QHBoxLayout()
+        scale_labels.addWidget(QLabel("❄️ Dead"))
+        scale_labels.addStretch()
+        scale_labels.addWidget(QLabel("😴 Low"))
+        scale_labels.addStretch()
+        scale_labels.addWidget(QLabel("🟢 Normal"))
+        scale_labels.addStretch()
+        scale_labels.addWidget(QLabel("🟡 High"))
+        scale_labels.addStretch()
+        scale_labels.addWidget(QLabel("🔥 Extreme"))
+        scale_layout.addLayout(scale_labels)
+        layout.addWidget(scale_group)
+
+        layout.addStretch()
+        scroll.setWidget(content)
+        main_layout.addWidget(scroll)
+        return tab
+
+    def _update_vix_gauge(self, result):
+        data = backend.get_vix_premium_gauge(result)
+        if not data.get("ready"):
+            return
+        self.vix_level_label.setText(f"{data['level']}  VIX: {data['vix']:.2f}")
+        self.vix_level_label.setStyleSheet(f"font-size: 28px; font-weight: bold; color: {data['color']};")
+        self.vix_quality_label.setText(f"Premium Quality: {data['premium_quality']}")
+        self.vix_advice_label.setText(data["advice"])
+        self.vix_meter.setValue(data["score"])
+        self.vix_meter.setFormat(f"{data['score']}% — {data['premium_quality']}")
+        # Color the meter
+        self.vix_meter.setStyleSheet(f"""
+            QProgressBar::chunk {{ background-color: {data['color']}; border-radius: 4px; }}
+            QProgressBar {{ border: 1px solid {DARK_BORDER}; border-radius: 6px; background-color: {DARK_BG}; text-align: center; font-size: 14px; font-weight: bold; color: white; }}
+        """)
+        self.vix_level_card.setStyleSheet(f"background-color: {DARK_CARD}; border: 2px solid {data['color']}; border-radius: 12px; padding: 15px;")
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # TAB: WIN RATE TRACKER
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def _build_win_rate_tab(self):
+        tab = QWidget()
+        main_layout = QVBoxLayout(tab)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(f"QScrollArea {{ border: none; background-color: {DARK_BG}; }}")
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        title = QLabel("🏆 Personal Win Rate Tracker")
+        title.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 24px; font-weight: bold;")
+        layout.addWidget(title)
+        desc = QLabel("Track your personal trading results. Learn which regimes you win in and which to avoid.")
+        desc.setStyleSheet(f"color: {TEXT_DIM}; font-size: 14px;")
+        layout.addWidget(desc)
+
+        # Stats card
+        self.winrate_card = QFrame()
+        self.winrate_card.setMinimumHeight(100)
+        self.winrate_card.setStyleSheet(f"background-color: {DARK_CARD}; border: 2px solid {DARK_BORDER}; border-radius: 12px; padding: 15px;")
+        winrate_layout = QVBoxLayout(self.winrate_card)
+        self.winrate_summary = QLabel("No trades logged yet. Use Position Manager to log and close trades.")
+        self.winrate_summary.setWordWrap(True)
+        self.winrate_summary.setStyleSheet(f"font-size: 14px; color: {TEXT_PRIMARY};")
+        winrate_layout.addWidget(self.winrate_summary)
+        layout.addWidget(self.winrate_card)
+
+        # Stats grid
+        stats_group = QGroupBox("📊 Performance Stats")
+        stats_layout = QHBoxLayout(stats_group)
+
+        for label in ["Total Trades", "Wins", "Losses", "Win Rate", "Avg Win", "Avg Loss"]:
+            card = QFrame()
+            card.setStyleSheet(f"background-color: {DARK_CARD}; border: 1px solid {DARK_BORDER}; border-radius: 8px; padding: 10px;")
+            cl = QVBoxLayout(card)
+            lbl_title = QLabel(label)
+            lbl_title.setStyleSheet(f"font-size: 11px; color: {TEXT_DIM};")
+            lbl_title.setAlignment(Qt.AlignCenter)
+            cl.addWidget(lbl_title)
+            lbl_val = QLabel("--")
+            lbl_val.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {ACCENT_CYAN};")
+            lbl_val.setAlignment(Qt.AlignCenter)
+            lbl_val.setObjectName(f"winrate_{label.lower().replace(' ', '_')}")
+            cl.addWidget(lbl_val)
+            stats_layout.addWidget(card)
+
+        layout.addWidget(stats_group)
+
+        # Refresh button
+        btn_refresh = QPushButton("🔄 Refresh Stats")
+        btn_refresh.clicked.connect(self._refresh_win_rate)
+        layout.addWidget(btn_refresh)
+
+        layout.addStretch()
+        scroll.setWidget(content)
+        main_layout.addWidget(scroll)
+        return tab
+
+    def _refresh_win_rate(self):
+        data = backend.get_win_rate_stats()
+        if not data.get("ready"):
+            self.winrate_summary.setText(data.get("message", "No data available."))
+            return
+        self.winrate_summary.setText(data["message"])
+        # Update stat cards
+        stat_map = {
+            "winrate_total_trades": str(data["total_trades"]),
+            "winrate_wins": str(data["wins"]),
+            "winrate_losses": str(data["losses"]),
+            "winrate_win_rate": f"{data['win_rate']}%",
+            "winrate_avg_win": f"₹{data['avg_win']:,.0f}"
+        }
+
+    def _update_tactical_charts(self, chart_data):
+        """Render the historical and AI logic charts."""
+        # 1. Historical Recovery Chart
+        hist = chart_data.get('historical')
+        if hist:
+            ax = self.hist_canvas.axes
+            ax.cla()
+            ax.set_facecolor(DARK_CARD)
+            bars = ax.bar(hist['labels'], hist['values'], color=['#3498db', '#2980b9', '#1f618d', '#1a5276'])
+            ax.set_title(hist['title'], color='white', fontsize=10, fontweight='bold')
+            ax.set_ylabel("Recovery %", color=TEXT_DIM, fontsize=8)
+            ax.tick_params(axis='x', colors=TEXT_DIM, labelsize=7)
+            ax.tick_params(axis='y', colors=TEXT_DIM, labelsize=7)
+            ax.set_ylim(0, 110)
+            ax.grid(True, axis='y', linestyle='--', alpha=0.1)
+            for bar in bars:
+                height = bar.get_height()
+                ax.text(bar.get_x() + bar.get_width()/2., height + 2, f'{height:.0f}%', ha='center', va='bottom', color='white', fontsize=7)
+            self.hist_canvas.draw()
+
+        # 2. AI Logic Adjustment Chart
+        ai = chart_data.get('ai_logic')
+        if ai:
+            ax = self.ai_canvas.axes
+            ax.cla()
+            ax.set_facecolor(DARK_CARD)
+            # Match colors to direction: green for positive adjustment, red for negative
+            adj_color = '#00FF7F' if ai['values'][1] > 0 else '#FF4B4B'
+            colors = ['#8B8D97', adj_color, '#00FF7F' if ai['values'][2] > 50 else '#FFD700']
+            bars = ax.bar(ai['labels'], ai['values'], color=colors)
+            ax.axhline(0, color='white', linewidth=0.5)
+            ax.set_title(ai['title'], color='white', fontsize=10, fontweight='bold')
+            ax.set_ylabel("Prob %", color=TEXT_DIM, fontsize=8)
+            ax.tick_params(axis='x', colors=TEXT_DIM, labelsize=7)
+            ax.tick_params(axis='y', colors=TEXT_DIM, labelsize=7)
+            
+            val_min = min(ai['values'])
+            ax.set_ylim(min(0, val_min - 10), 110)
+            
+            for bar in bars:
+                height = bar.get_height()
+                y_pos = height + 2 if height >= 0 else height - 10
+                ax.text(bar.get_x() + bar.get_width()/2., y_pos, f'{height:.0f}%', ha='center', va='bottom', color='white', fontsize=7)
+            self.ai_canvas.draw()
     
     # ─────────────────────────────────────────────────────────────────────────
     # TAB: POSITION MANAGER — The Backbone
@@ -897,9 +1899,11 @@ class DavidOracleWindow(QMainWindow):
         dd_cards = QHBoxLayout()
         self.card_dd_severity = MetricCard("SEVERITY", "🟢 SAFE", ACCENT_GREEN)
         self.card_dd_drawdown = MetricCard("DRAWDOWN", "0.0%", TEXT_PRIMARY)
+        self.card_pos_health = MetricCard("HEALTH", "—", TEXT_PRIMARY)
         self.card_dd_streak = MetricCard("LOSS STREAK", "0", TEXT_PRIMARY)
         dd_cards.addWidget(self.card_dd_severity)
         dd_cards.addWidget(self.card_dd_drawdown)
+        dd_cards.addWidget(self.card_pos_health)
         dd_cards.addWidget(self.card_dd_streak)
         dd_layout.addLayout(dd_cards)
         
@@ -2059,77 +3063,6 @@ class DavidOracleWindow(QMainWindow):
             "update the 'Actual' direction to see your win rate grow."
         )
         info.setWordWrap(True)
-        info.setStyleSheet(f"color: {TEXT_DIM}; font-size: 12px; padding: 10px;")
-        layout.addWidget(info)
-        
-        layout.addStretch()
-        scroll.setWidget(content)
-        main_layout.addWidget(scroll)
-        
-        # Initial load
-        QTimer.singleShot(500, self._refresh_weekly_report)
-        
-        return tab
-    
-    def _refresh_weekly_report(self):
-        """Refresh the weekly report tab with latest data."""
-        from analyzers.trade_journal import generate_weekly_report, get_drawdown_status
-        
-        # Drawdown Shield
-        dd = get_drawdown_status()
-        if dd["active"]:
-            self.drawdown_status.setText(dd["message"])
-            self.drawdown_status.setStyleSheet(f"""
-                color: {TEXT_PRIMARY}; font-size: 14px; padding: 12px;
-                background-color: #2a1a1a; border-radius: 8px;
-                border-left: 4px solid {ACCENT_RED};
-            """)
-        else:
-            self.drawdown_status.setText(dd["message"])
-            self.drawdown_status.setStyleSheet(f"""
-                color: {TEXT_PRIMARY}; font-size: 14px; padding: 12px;
-                background-color: {DARK_CARD}; border-radius: 8px;
-                border-left: 4px solid {ACCENT_GREEN};
-            """)
-        
-        # Weekly Report
-        report = generate_weekly_report()
-        
-        wr = report["win_rate"]
-        wr_color = ACCENT_GREEN if wr >= 60 else ACCENT_GOLD if wr >= 40 else ACCENT_RED
-        self.wr_win_rate.set_value(f"{wr:.0f}%", wr_color)
-        
-        pnl = report["net_pnl"]
-        pnl_color = ACCENT_GREEN if pnl >= 0 else ACCENT_RED
-        self.wr_net_pnl.set_value(f"₹{pnl:,.0f}", pnl_color)
-        
-        streak = report["streak"]
-        if streak > 0:
-            self.wr_streak.set_value(f"{streak}W 🔥", ACCENT_GREEN)
-        elif streak < 0:
-            self.wr_streak.set_value(f"{abs(streak)}L", ACCENT_RED)
-        else:
-            self.wr_streak.set_value("—")
-        
-        self.wr_total.set_value(str(report["total_entries"]))
-        
-        # Table
-        entries = report["entries"]
-        self.wr_table.setRowCount(len(entries))
-        for i, entry in enumerate(entries):
-            self.wr_table.setItem(i, 0, QTableWidgetItem(entry.get("date", "")))
-            
-            signal = entry.get("signal", "")
-            signal_emoji = {"GREEN": "🟢", "YELLOW": "🟡", "RED": "🔴"}.get(signal, "")
-            self.wr_table.setItem(i, 1, QTableWidgetItem(f"{signal_emoji} {signal}"))
-            
-            self.wr_table.setItem(i, 2, QTableWidgetItem(entry.get("predicted", "—")))
-            self.wr_table.setItem(i, 3, QTableWidgetItem(entry.get("actual", "—")))
-            
-            result = entry.get("result", "—")
-            result_emoji = {"WIN": "✅ WIN", "LOSS": "❌ LOSS", "AVOIDED": "⏸️ AVOIDED"}.get(result, "—")
-            self.wr_table.setItem(i, 4, QTableWidgetItem(result_emoji))
-
     # ─────────────────────────────────────────────────────────────────────────
     # TAB 6: DAVID CODEX — A-to-Z Trading Guide
     # ─────────────────────────────────────────────────────────────────────────
@@ -2442,160 +3375,6 @@ class DavidOracleWindow(QMainWindow):
     # ─────────────────────────────────────────────────────────────────────────
     # TAB: 💡 TRADE RECOMMENDATIONS
     # ─────────────────────────────────────────────────────────────────────────
-    
-    def _build_trade_recommendations_tab(self):
-        tab = QWidget()
-        main_layout = QVBoxLayout(tab)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet(f"QScrollArea {{ border: none; background-color: {DARK_BG}; }}")
-        
-        content = QWidget()
-        layout = QVBoxLayout(content)
-        layout.setContentsMargins(20, 12, 20, 12)
-        layout.setSpacing(12)
-        
-        title = QLabel("💡 Trade Recommendations")
-        title.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 22px; font-weight: bold;")
-        layout.addWidget(title)
-        
-        subtitle = QLabel("AI-driven dynamic strike selection with Black-Scholes pricing, whipsaw detection, and Kelly sizing.")
-        subtitle.setStyleSheet(f"color: {TEXT_DIM}; font-size: 12px;")
-        layout.addWidget(subtitle)
-        
-        # ── Row 1: Risk Intelligence Meters ──
-        meters_row = QHBoxLayout()
-        
-        self.tr_whipsaw_card = MetricCard("⚡ WHIPSAW RISK", "—", ACCENT_GOLD)
-        self.tr_whipsaw_card.setToolTip("Probability of price reversals in the next few days. >40% auto-downgrades to Iron Condor.")
-        meters_row.addWidget(self.tr_whipsaw_card)
-        
-        self.tr_regime_card = MetricCard("🛡️ REGIME STABILITY", "—", ACCENT_CYAN)
-        self.tr_regime_card.setToolTip("How stable is the current market regime? Low = regime flip imminent.")
-        meters_row.addWidget(self.tr_regime_card)
-        
-        self.tr_sizing_card = MetricCard("📐 POSITION SIZE", "—", ACCENT_GREEN)
-        self.tr_sizing_card.setToolTip("Kelly-weighted lots based on AI confidence. 0 = skip trade.")
-        meters_row.addWidget(self.tr_sizing_card)
-        
-        self.tr_expiry_card = MetricCard("📅 DAYS TO EXPIRY", "—", TEXT_SEC)
-        self.tr_expiry_card.setToolTip("Trading days until the nearest NIFTY weekly expiry (Thursday).")
-        meters_row.addWidget(self.tr_expiry_card)
-        
-        layout.addLayout(meters_row)
-        
-        # ── Row 1.5: Greeks Dashboard (Feature 10) ──
-        greeks_row = QHBoxLayout()
-        
-        self.tr_delta_card = MetricCard("δ NET DELTA", "—", ACCENT_CYAN)
-        self.tr_delta_card.setToolTip("Directional bias. +10 means you gain ₹10 for every 1pt NIFTY move up.")
-        greeks_row.addWidget(self.tr_delta_card)
-        
-        self.tr_theta_card = MetricCard("θ DAILY DECAY", "—", ACCENT_GREEN)
-        self.tr_theta_card.setToolTip("Expected daily income from time decay. Positive is good for sellers.")
-        greeks_row.addWidget(self.tr_theta_card)
-        
-        self.tr_gamma_card = MetricCard("γ GAMMA RISK", "—", ACCENT_GOLD)
-        self.tr_gamma_card.setToolTip("Sensitivity of Delta. High Gamma means risk accelerates as prices move.")
-        greeks_row.addWidget(self.tr_gamma_card)
-        
-        layout.addLayout(greeks_row)
-        
-        # ── Row 2: Strategy Recommendation Card ──
-        self.tr_card = QFrame()
-        self.tr_card.setStyleSheet(f"""
-            QFrame {{
-                background-color: {DARK_CARD};
-                border: 1px solid {DARK_BORDER};
-                border-radius: 8px;
-            }}
-        """)
-        tr_layout = QVBoxLayout(self.tr_card)
-        tr_layout.setContentsMargins(20, 15, 20, 15)
-        
-        self.tr_title = QLabel("NO PREDICTION YET")
-        self.tr_title.setStyleSheet(f"color: {ACCENT_GOLD}; font-size: 20px; font-weight: bold; border: none;")
-        tr_layout.addWidget(self.tr_title)
-        
-        self.tr_reasoning = QLabel("Run Fetch Spot + Predict to see the AI's exact strike recommendations.")
-        self.tr_reasoning.setWordWrap(True)
-        self.tr_reasoning.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 13px; border: none; margin-top: 8px;")
-        tr_layout.addWidget(self.tr_reasoning)
-        
-        self.tr_legs_label = QLabel("")
-        self.tr_legs_label.setWordWrap(True)
-        self.tr_legs_label.setStyleSheet(f"color: {ACCENT_CYAN}; font-size: 14px; font-family: monospace; border: none; margin-top: 8px;")
-        tr_layout.addWidget(self.tr_legs_label)
-        
-        self.tr_firefight = QLabel("")
-        self.tr_firefight.setWordWrap(True)
-        self.tr_firefight.setStyleSheet(f"color: {TEXT_SEC}; font-size: 12px; border: none; margin-top: 8px; padding: 10px; background-color: rgba(255, 75, 75, 0.1); border-left: 3px solid {ACCENT_RED};")
-        tr_layout.addWidget(self.tr_firefight)
-        
-        layout.addWidget(self.tr_card)
-        
-        # ── Row 3: Bounce-Back Estimator ──
-        self.tr_bounce_card = QFrame()
-        self.tr_bounce_card.setStyleSheet(f"""
-            QFrame {{
-                background-color: rgba(0, 206, 209, 0.05);
-                border: 1px solid rgba(0, 206, 209, 0.3);
-                border-radius: 8px;
-            }}
-        """)
-        bounce_layout = QVBoxLayout(self.tr_bounce_card)
-        bounce_layout.setContentsMargins(15, 12, 15, 12)
-        
-        self.tr_bounce_label = QLabel("📊 Historical Bounce-Back Estimator: Run prediction to analyze...")
-        self.tr_bounce_label.setWordWrap(True)
-        self.tr_bounce_label.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 13px; border: none;")
-        bounce_layout.addWidget(self.tr_bounce_label)
-        
-        layout.addWidget(self.tr_bounce_card)
-        
-        # ── Row 4: Payoff Graph ──
-        graph_title = QLabel("📊 Projected Payoff Graph at Expiry")
-        graph_title.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 16px; font-weight: bold; margin-top: 5px;")
-        layout.addWidget(graph_title)
-        
-        self.tr_chart = ChartCanvas(width=10, height=4)
-        layout.addWidget(self.tr_chart, stretch=1)
-        
-        # ── Row 5: Export to War Room + History ──
-        bottom_row = QHBoxLayout()
-        
-        self.tr_export_btn = QPushButton("⚔️  Export to War Room")
-        self.tr_export_btn.setToolTip("Send these recommended legs to the War Room for live tracking.")
-        self.tr_export_btn.clicked.connect(self._on_export_to_war_room)
-        self.tr_export_btn.setStyleSheet(f"""
-            QPushButton {{
-                border-left: 3px solid {ACCENT_GOLD};
-                padding: 10px 20px;
-                font-size: 13px;
-                font-weight: bold;
-            }}
-        """)
-        bottom_row.addWidget(self.tr_export_btn)
-        bottom_row.addStretch()
-        
-        layout.addLayout(bottom_row)
-        
-        # ── Row 6: Recommendation History ──
-        history_title = QLabel("📜 Recent Recommendations")
-        history_title.setStyleSheet(f"color: {TEXT_DIM}; font-size: 13px; font-weight: bold; margin-top: 5px;")
-        layout.addWidget(history_title)
-        
-        self.tr_history_label = QLabel("No history yet. Recommendations will be logged after each prediction.")
-        self.tr_history_label.setWordWrap(True)
-        self.tr_history_label.setStyleSheet(f"color: {TEXT_DIM}; font-size: 11px; border: none;")
-        layout.addWidget(self.tr_history_label)
-        
-        layout.addStretch()
-        scroll.setWidget(content)
-        main_layout.addWidget(scroll)
-        return tab
 
     def _on_export_to_war_room(self):
         """Export the AI-recommended legs to the War Room tab."""
@@ -2723,6 +3502,20 @@ class DavidOracleWindow(QMainWindow):
         
         layout.addLayout(mid_row)
         
+        # ── Row 2.5: Institutional Sentiment ──
+        inst_title = QLabel("🏛️ Institutional Sentiment (Daily)")
+        inst_title.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 16px; font-weight: bold; margin-top: 10px;")
+        layout.addWidget(inst_title)
+        
+        inst_row = QHBoxLayout()
+        self.pa_pcr = MetricCard("PUT-CALL RATIO", "—", ACCENT_CYAN)
+        self.pa_fii = MetricCard("FII NET (Cr)", "—", ACCENT_GREEN)
+        self.pa_dii = MetricCard("DII NET (Cr)", "—", ACCENT_GOLD)
+        inst_row.addWidget(self.pa_pcr)
+        inst_row.addWidget(self.pa_fii)
+        inst_row.addWidget(self.pa_dii)
+        layout.addLayout(inst_row)
+        
         # ── Row 3: AI vs PA Alignment ──
         self.pa_alignment_card = QFrame()
         self.pa_alignment_card.setStyleSheet(f"background-color: rgba(255, 215, 0, 0.05); border: 1px solid {ACCENT_GOLD}; border-radius: 8px;")
@@ -2777,8 +3570,14 @@ class DavidOracleWindow(QMainWindow):
                 self.append_log("⚠️ Price Action update skipped: 15m data files not found.")
                 return
                 
-            df_n = pd.read_csv(nifty_csv, parse_dates=["date"]).set_index("date")
-            df_v = pd.read_csv(vix_csv, parse_dates=["date"]).set_index("date")
+            # Explicitly load without parse_dates to speed up loading by 100x
+            df_n = pd.read_csv(nifty_csv)
+            df_n['date'] = pd.to_datetime(df_n['date'], format='%Y-%m-%d %H:%M:%S', errors='coerce')
+            df_n.set_index("date", inplace=True)
+            
+            df_v = pd.read_csv(vix_csv)
+            df_v['date'] = pd.to_datetime(df_v['date'], format='%Y-%m-%d %H:%M:%S', errors='coerce')
+            df_v.set_index("date", inplace=True)
             
             pa = calculate_pa_metrics(df_n, df_v)
             if not pa["success"]:
@@ -2829,11 +3628,31 @@ class DavidOracleWindow(QMainWindow):
             else:
                 self.pa_fvg_label.setText("No large FVGs / Imbalances found.")
 
-            # 6. Levels
+            # 6. Levels (using precise data if available directly on PA tab logic, or fallback to simple PA strings)
             lvls = pa["levels"]
-            sup_str = ", ".join([f"{s:,.0f}" for s in lvls["support"]])
-            res_str = ", ".join([f"{r:,.0f}" for r in lvls["resistance"]])
-            self.pa_levels_label.setText(f"Support: {sup_str}\nResistance: {res_str}")
+            
+            # Note: Enhanced support and resistance levels are also managed through `_update_dashboard` passing into this tab.
+            if pred and "supports" in pred and "resistances" in pred:
+                spot = pred.get("spot_price", 0)
+                res_str_arr = []
+                sup_str_arr = []
+                
+                for r in pred.get("resistances", [])[:3]:
+                    dist = ((r['price'] - spot) / spot) * 100
+                    res_str_arr.append(f"{r['price']:,.0f} (+{dist:.1f}%)")
+                    
+                for s in pred.get("supports", [])[:3]:
+                    dist = ((spot - s['price']) / spot) * 100
+                    sup_str_arr.append(f"{s['price']:,.0f} (-{dist:.1f}%)")
+                    
+                res_text = " | ".join(res_str_arr) if res_str_arr else "—"
+                sup_text = " | ".join(sup_str_arr) if sup_str_arr else "—"
+                self.pa_levels_label.setText(f"Resistance: {res_text}\nSupport: {sup_text}")
+            else:
+                sup_str = ", ".join([f"{s:,.0f}" for s in lvls["support"]])
+                res_str = ", ".join([f"{r:,.0f}" for r in lvls["resistance"]])
+                self.pa_levels_label.setText(f"Support: {sup_str}\nResistance: {res_str}")
+
             
             # 6. Alignment Score
             # Check if AI direction matches PA patterns/divergence
@@ -2873,228 +3692,25 @@ class DavidOracleWindow(QMainWindow):
             
             self.pa_alignment_text.setText(align_text)
             
-        except Exception as e:
-            self.append_log(f"⚠️ Price Action update failed: {e}")
+            # 7. Update Sentiment Cards
+            if pred:
+                pcr = pred.get("pcr", 1.0)
+                pcr_color = ACCENT_GREEN if pcr < 0.8 else ACCENT_RED if pcr > 1.2 else ACCENT_GOLD
+                self.pa_pcr.set_value(f"{pcr:.2f}", pcr_color)
 
-    def _update_trade_recommendations_tab(self, pred):
-        """Update the Trade Recommendations tab with all advanced features."""
-        if not hasattr(self, 'tr_title') or pred is None or not pred.get("success"):
-            return
-            
-        from analyzers.trade_recommender import generate_recommendation
-        from analyzers.price_action_engine import calculate_pa_metrics
-        from analyzers.options_payoff import compute_payoff
-        
-        spot = pred.get("spot_price", 24500)
-        vix = pred.get("vix_value", 15.0) or 15.0
-        pcr = pred.get("pcr", 1.0)
-        regime = pred.get("regime", "CHOPPY")
-        
-        direction = "SIDEWAYS"
-        confidence = 50.0
-        if pred.get("ensemble_prediction"):
-            direction = pred["ensemble_prediction"].get("direction", "SIDEWAYS")
-            confidence = pred["ensemble_prediction"].get("confidence", 0.5) * 100
-        
-        # ── Feature 1 & 5: Whipsaw + Regime Stability ──
-        whipsaw_prob = None
-        flip_risk = 0
-        chop_range = None
-        try:
-            from analyzers.whipsaw_detector import WhipsawDetector
-            import pandas as pd
-            nifty_csv = os.path.join(os.path.dirname(__file__), "data", "nifty_daily.csv")
-            if os.path.exists(nifty_csv):
-                df_ws = pd.read_csv(nifty_csv, parse_dates=["date"])
-                # Add minimal features needed by WhipsawDetector
-                df_ws["returns_1d"] = df_ws["close"].pct_change()
-                df_ws["bb_width"] = df_ws["close"].rolling(20).std() / df_ws["close"].rolling(20).mean()
-                df_ws["atr_14"] = (df_ws["high"] - df_ws["low"]).rolling(14).mean()
-                df_ws["atr_ratio"] = df_ws["atr_14"] / df_ws["close"]
-                df_ws["realized_vol_20"] = df_ws["returns_1d"].rolling(20).std() * (252 ** 0.5)
-                df_ws["adx"] = 25  # Placeholder — real ADX needs DI+/DI-
-                df_ws["vix"] = vix
-                df_ws = df_ws.dropna()
+                fii = pred.get("fii_net", 0)
+                self.pa_fii.set_value(f"{fii:,.0f}", ACCENT_GREEN if fii > 0 else ACCENT_RED)
                 
-                ws = WhipsawDetector()
-                ws_result = ws.analyze(df_ws)
-                whipsaw_prob = ws_result.get("whipsaw_prob", 0)
-                flip_risk = ws_result.get("flip_risk", 0)
-                chop_range = ws_result.get("chop_range")
+                dii = pred.get("dii_net", 0)
+                self.pa_dii.set_value(f"{dii:,.0f}", ACCENT_GREEN if dii > 0 else ACCENT_RED)
+                
         except Exception as e:
-            self.append_log(f"⚠️ Whipsaw analysis failed: {e}")
-        
-        # Update Whipsaw Meter
-        if whipsaw_prob is not None:
-            if whipsaw_prob > 55:
-                ws_color = ACCENT_RED
-                ws_text = f"{whipsaw_prob:.0f}% 🔴"
-            elif whipsaw_prob > 30:
-                ws_color = ACCENT_GOLD
-                ws_text = f"{whipsaw_prob:.0f}% ⚠️"
-            else:
-                ws_color = ACCENT_GREEN
-                ws_text = f"{whipsaw_prob:.0f}% ✅"
-            self.tr_whipsaw_card.set_value(ws_text, ws_color)
-        
-        # Update Regime Stability
-        stability = max(0, 100 - flip_risk)
-        if stability < 40:
-            stab_color = ACCENT_RED
-            stab_text = f"{stability:.0f}% ⚠️"
-        elif stability < 70:
-            stab_color = ACCENT_GOLD
-            stab_text = f"{stability:.0f}%"
-        else:
-            stab_color = ACCENT_GREEN
-            stab_text = f"{stability:.0f}% ✅"
-        self.tr_regime_card.set_value(stab_text, stab_color)
-        
-        # ── Generate Recommendation (Features 1,3,4,6 built into trade_recommender.py) ──
-        rec = generate_recommendation(spot, vix, pcr, direction, confidence, regime,
-                                       whipsaw_prob=whipsaw_prob)
-        
-        self._last_trade_rec = rec  # Store for Export to War Room
-        
-        meta = rec.get("meta", {})
-        dte = meta.get("days_to_expiry", 5)
-        lots = meta.get("lots", 1)
-        
-        # Update sizing and expiry cards
-        is_caution = meta.get("is_caution", False)
-        if lots >= 2:
-            self.tr_sizing_card.set_value(f"{lots} Lots 🔥", ACCENT_GREEN)
-        elif is_caution:
-            self.tr_sizing_card.set_value(f"{lots} Lot ⚠️", ACCENT_GOLD)
-        else:
-            self.tr_sizing_card.set_value(f"{lots} Lot", TEXT_PRIMARY)
-        
-        expiry_str = meta.get("expiry_str", "")
-        self.tr_expiry_card.set_value(f"{dte}d ({expiry_str})", ACCENT_CYAN if dte > 2 else ACCENT_RED)
-        
-        # Update Greeks Cards (Feature 10)
-        greeks = meta.get("greeks", {})
-        if greeks:
-            d = greeks.get("delta", 0)
-            t = greeks.get("theta", 0)
-            g = greeks.get("gamma", 0)
-            
-            self.tr_delta_card.set_value(f"{d:+.0f}", ACCENT_CYAN if abs(d) < 50 else ACCENT_GOLD)
-            self.tr_theta_card.set_value(f"₹{t:+.0f}", ACCENT_GREEN if t > 0 else ACCENT_RED)
-            self.tr_gamma_card.set_value(f"{g:.3f}", ACCENT_GOLD if g > 0.05 else TEXT_PRIMARY)
-        
-        # ── Update Strategy Card ──
-        self.tr_title.setText(f"💡 STRATEGY: {rec['strategy']}")
-        
-        reasoning_html = "<b>Why this trade?</b><ul>"
-        for r in rec['reasoning']:
-            reasoning_html += f"<li>{r}</li>"
-        reasoning_html += "</ul>"
-        self.tr_reasoning.setText(reasoning_html)
-        
-        if rec['legs']:
-            legs_text = "<b>Recommended Legs:</b><br>"
-            for leg in rec['legs']:
-                color = ACCENT_RED if leg['action'] == "SELL" else ACCENT_GREEN
-                legs_text += f"&nbsp;&nbsp;• <span style='color:{color};'><b>{leg['action']}</b></span> {leg['strike']} {leg['option_type']} @ ₹{leg['premium']:.0f} × {leg.get('lots', 1)} lot(s)<br>"
-            self.tr_legs_label.setText(legs_text)
-        else:
-            self.tr_legs_label.setText("<b>No legs — AI says skip this session.</b>")
-        
-        ff_html = "<b>🔥 Firefight Triggers:</b><ul>"
-        for f_item in rec['firefight']:
-            ff_html += f"<li>{f_item}</li>"
-        ff_html += "</ul>"
-        if whipsaw_prob and whipsaw_prob > 40:
-            ff_html += f"<p style='color:{ACCENT_RED};'><b>⚡ Whipsaw Override Active:</b> Strategy was auto-downgraded to Iron Condor due to {whipsaw_prob:.0f}% whipsaw risk.</p>"
-        if stability < 40:
-            ff_html += f"<p style='color:{ACCENT_GOLD};'><b>⚠️ Regime Instability:</b> Regime may flip in 1-2 days (stability {stability:.0f}%). Consider halving position size.</p>"
-        self.tr_firefight.setText(ff_html)
-        
-        # ── Feature 2: Bounce-Back Estimator ──
-        try:
-            from analyzers.bounce_analyzer import BounceAnalyzer
-            import pandas as pd
-            nifty_csv = os.path.join(os.path.dirname(__file__), "data", "nifty_daily.csv")
-            if os.path.exists(nifty_csv) and rec['legs']:
-                df_bounce = pd.read_csv(nifty_csv, parse_dates=["date"])
-                # Find the sold strike (most at-risk price level)
-                sold_legs = [l for l in rec['legs'] if l['action'] == 'SELL']
-                if sold_legs:
-                    target = sold_legs[0]['strike']
-                    ba = BounceAnalyzer()
-                    bounce_result = ba.analyze(df_bounce, target, days_list=[3, 5, 10])
-                    
-                    bounce_html = f"<b>📊 If NIFTY drops to {target:,.0f} (your sold strike):</b><br>"
-                    for days, data in bounce_result.get("timeframes", {}).items():
-                        prob = data["recovery_prob"]
-                        avg_d = data["avg_recovery_days"]
-                        scenarios = data["scenarios_found"]
-                        emoji = "🟢" if prob > 60 else ("🟡" if prob > 40 else "🔴")
-                        bounce_html += f"&nbsp;&nbsp;{emoji} <b>{days}-day window:</b> {prob:.0f}% recovery chance (avg {avg_d:.1f} days, {scenarios} historical events)<br>"
-                    self.tr_bounce_label.setText(bounce_html)
-                else:
-                    self.tr_bounce_label.setText("📊 No sold strikes in this recommendation — bounce analysis not applicable.")
-            else:
-                self.tr_bounce_label.setText("📊 Data unavailable for bounce analysis.")
-        except Exception as e:
-            self.tr_bounce_label.setText(f"📊 Bounce analysis unavailable: {e}")
-        
-        # ── Draw Payoff Graph ──
-        if rec['legs']:
-            payoff = compute_payoff(rec['legs'], spot_price=spot)
-            
-            self.tr_chart.ax.clear()
-            self.tr_chart.ax.set_facecolor(DARK_BG)
-            
-            self.tr_chart.ax.fill_between(
-                payoff["prices"], payoff["payoff"], 0,
-                where=payoff["payoff"] >= 0, alpha=0.3, color='#00FF7F'
-            )
-            self.tr_chart.ax.fill_between(
-                payoff["prices"], payoff["payoff"], 0,
-                where=payoff["payoff"] < 0, alpha=0.3, color='#FF4B4B'
-            )
-            
-            self.tr_chart.ax.plot(payoff["prices"], payoff["payoff"], color='#00CED1', linewidth=2)
-            self.tr_chart.ax.axhline(y=0, color='#555', linewidth=0.8)
-            self.tr_chart.ax.axvline(x=spot, color='#FFD700', linewidth=1.5, linestyle='--', label=f'Spot: {spot:,.0f}')
-            
-            # Mark breakevens
-            for be in payoff.get("breakevens", []):
-                self.tr_chart.ax.axvline(x=be, color='#FF6B6B', linewidth=1, linestyle=':', alpha=0.7, label=f'BE: {be:,.0f}')
-            
-            # Mark chop range if available
-            if chop_range:
-                self.tr_chart.ax.axvspan(chop_range[0], chop_range[1], alpha=0.08, color='#FFD700', label='Expected Chop Zone')
-            
-            self.tr_chart.ax.set_xlabel('NIFTY Spot Price', color=TEXT_DIM, fontsize=10)
-            self.tr_chart.ax.set_ylabel('P&L (₹)', color=TEXT_DIM, fontsize=10)
-            self.tr_chart.ax.set_title(f'{rec["strategy"]} — {lots} Lot(s), {dte}d to Expiry', color=TEXT_PRIMARY, fontsize=12)
-            self.tr_chart.ax.tick_params(colors=TEXT_DIM)
-            self.tr_chart.ax.legend(loc='upper left', fontsize=8, facecolor=DARK_CARD, edgecolor=DARK_BORDER, labelcolor=TEXT_DIM)
-            
-            self.tr_chart.fig.tight_layout()
-            self.tr_chart.draw()
-        
-        # ── Feature 8: Log Recommendation ──
-        try:
-            from analyzers.trade_recs_logger import log_recommendation, get_recs_history
-            log_recommendation(rec, spot_price=spot, vix=vix, direction=direction, confidence=confidence)
-            
-            history = get_recs_history(5)
-            if history:
-                hist_html = ""
-                for h in reversed(history):
-                    ts = h.get("timestamp", "")
-                    strat = h.get("strategy", "—")
-                    h_dir = h.get("direction", "—")
-                    h_conf = h.get("confidence", 0)
-                    hist_html += f"<span style='color:{TEXT_DIM};'>{ts}</span> — <b>{strat}</b> ({h_dir} @ {h_conf:.0f}%)<br>"
-                self.tr_history_label.setText(hist_html)
-        except Exception:
-            pass
-    
+            import traceback
+            trace_str = traceback.format_exc()
+            self.append_log(f"⚠️ Price Action update failed: {e}\n{trace_str}")
+            print(f"Price Action Error: {e}")
+            print(trace_str)
+
     # ─────────────────────────────────────────────────────────────────────────
     # SHORTCUTS & STATUS BAR
     # ─────────────────────────────────────────────────────────────────────────
@@ -3184,8 +3800,10 @@ class DavidOracleWindow(QMainWindow):
             self._update_forecast(result)
             self._update_position_manager(result)
             self._update_command_center(result)
-            self._update_trade_recommendations_tab(result)
             self._update_price_action_tab(result)
+            self._update_tactical_war_room(result)
+            self._update_strike_recommender(result)
+            self._update_vix_gauge(result)
             self._fetch_intraday_only()  # Auto-fetch intraday data on global refresh
             
             # Store prediction state for War Room
@@ -3338,6 +3956,28 @@ class DavidOracleWindow(QMainWindow):
             pnl_color = ACCENT_GREEN if pnl >= 0 else ACCENT_RED
             self.card_current_pnl.set_value(f"{pnl:+.1f}%", pnl_color)
             
+            # Position Health Tracker
+            try:
+                # Approximate DTE
+                from datetime import datetime
+                dte = 7
+                if entry_date:
+                    try:
+                        ed = datetime.strptime(entry_date, "%Y-%m-%d")
+                        # If entry date is in past, we need expiry date to calc DTE
+                        # For now, use a default 7 or look at saved expiry
+                        dte = 7 
+                    except: pass
+                
+                # Deduce short strike based on entry price and direction
+                short_strike = entry_price
+                health = backend.get_position_health(entry_dir, short_strike, current_price, dte, vix)
+                
+                self.card_pos_health.set_value(health["status"], health["color"])
+                self.card_pos_health.setToolTip(health["message"] + "\n\nAdvice: " + health.get("advice", ""))
+            except Exception as e:
+                print(f"Health check err: {e}")
+            
             # Drawdown severity
             sev = dd_status["severity"]
             sev_colors = {"SAFE": ACCENT_GREEN, "CAUTION": ACCENT_GOLD, "DANGER": ACCENT_RED, "EMERGENCY": ACCENT_RED}
@@ -3403,7 +4043,7 @@ class DavidOracleWindow(QMainWindow):
     def _update_dashboard(self, pred):
         """Populate dashboard cards from prediction results."""
         
-        # Verdict
+        # Verdict updating
         if pred.get("tree_prediction"):
             tp = pred["tree_prediction"]
             direction = tp.get("direction", "—")
@@ -3411,44 +4051,30 @@ class DavidOracleWindow(QMainWindow):
             
             if "UP" in str(direction).upper():
                 color = ACCENT_GREEN
+                icon = "🔥 Bullish"
             elif "DOWN" in str(direction).upper():
                 color = ACCENT_RED
+                icon = "🩸 Bearish"
             else:
                 color = ACCENT_GOLD
+                icon = "⚖️ Neutral"
             
-            self.card_verdict.set_value(direction, color)
-            self.card_confidence.set_value(f"{confidence:.0f}%", color)
+            msg = f"{icon} ({confidence:.0f}% conviction)"
+            self.card_verdict.set_value(msg, color)
+            self.card_tree.set_value(f"{tp['direction']} ({confidence:.0f}%)", color)
+            self.card_verdict.value_label.setStyleSheet(f"color: {color}; font-size: 32px; font-weight: bold;")
         
-        # Regime
+        # Regime Update
         regime = pred.get("regime", "—")
+        if "TREND" in regime:
+            regime = "Trend-following"
+        elif "CHOP" in regime:
+            regime = "Choppy (Reversals)"
+        elif "VOL" in regime:
+            regime = "Volatile (Wide range)"
         self.card_regime.set_value(regime, ACCENT_CYAN)
         
-        # Whipsaw
-        if pred.get("whipsaw"):
-            ws = pred["whipsaw"]
-            is_choppy = ws.get("is_choppy", False)
-            prob = ws.get("whipsaw_prob", 0)  # already a percentage (0-100)
-            chop_range = ws.get("chop_range", (0, 0))
-            
-            if is_choppy:
-                status = f"⚠️ CHOPPY ({prob:.0f}%)"
-                self.card_whipsaw.setToolTip(f"Expected Chop Range: {chop_range[0]:.0f} to {chop_range[1]:.0f}")
-            else:
-                status = f"✅ CLEAN ({prob:.0f}%)"
-                self.card_whipsaw.setToolTip(f"Trend is clean. Low whipsaw probability.")
-                
-            color = ACCENT_GOLD if is_choppy else ACCENT_GREEN
-            self.card_whipsaw.set_value(status, color)
-        
-        if pred.get("tree_prediction"):
-            tp = pred["tree_prediction"]
-            self.card_tree.set_value(
-                f"{tp['direction']} ({tp['confidence']*100:.0f}%)",
-                ACCENT_GREEN if "UP" in str(tp['direction']).upper() else ACCENT_RED
-            )
-        
-        # Pull latest 15-minute prediction if available
-        # It's an independent ML model predicting the immediate next 15-240 minutes
+        # Intraday predictions
         df_15m = getattr(self, '_last_15m_df', None)
         features_15m = getattr(self, '_last_15m_features', None)
         if df_15m is not None and features_15m is not None:
@@ -3462,6 +4088,9 @@ class DavidOracleWindow(QMainWindow):
                         i_conf = intra_pred.get("confidence", 0) * 100
                         i_color = ACCENT_GREEN if "UP" in i_dir else ACCENT_RED if "DOWN" in i_dir else ACCENT_GOLD
                         self.card_intraday_dash.set_value(f"{i_dir} ({i_conf:.0f}%)", i_color)
+                        
+                        # Add a tiny visual weight to the card text
+                        self.card_intraday_dash.value_label.setStyleSheet(f"color: {i_color}; font-size: 20px; font-weight: bold;")
                     else:
                         self.card_intraday_dash.set_value("—")
                 else:
@@ -3470,46 +4099,37 @@ class DavidOracleWindow(QMainWindow):
                 self.card_intraday_dash.set_value("Error", TEXT_DIM)
         else:
             self.card_intraday_dash.set_value("Sync 15m Data", TEXT_DIM)
+            
+        # Institutional ELI5 Features
+        oi_change = pred.get("oi_change_1d", 0.0)
+        oi_color = ACCENT_CYAN if abs(oi_change) < 5 else ACCENT_GOLD
+        self.card_oi_change.set_value(f"{oi_change:+.1f}%", oi_color)
         
-        # Sentiment
-        pcr = pred.get("pcr", 1.0)
-        pcr_color = ACCENT_GREEN if pcr < 0.8 else ACCENT_RED if pcr > 1.2 else ACCENT_GOLD
-        self.card_pcr.set_value(f"{pcr:.2f}", pcr_color)
+        l_bu = pred.get("long_build_up", 0)
+        s_bu = pred.get("short_build_up", 0)
+        l_un = pred.get("long_unwinding", 0)
+        s_cv = pred.get("short_covering", 0)
         
-        fii = pred.get("fii_net", 0)
-        self.card_fii.set_value(f"{fii:,.0f}", ACCENT_GREEN if fii > 0 else ACCENT_RED)
+        buildup_text = "NEUTRAL"
+        buildup_color = TEXT_DIM
+        if l_bu: 
+            buildup_text = "🔥 Real Rally"
+            buildup_color = ACCENT_GREEN
+        elif s_cv:
+            buildup_text = "⚠️ Short Covering (Weak)"
+            buildup_color = ACCENT_GOLD
+        elif s_bu: 
+            buildup_text = "🩸 Real Drop"
+            buildup_color = ACCENT_RED
+        elif l_un: 
+            buildup_text = "⚠️ Profit Booking"
+            buildup_color = ACCENT_GOLD
+            
+        self.card_buildup.set_value(buildup_text, buildup_color)
         
-        dii = pred.get("dii_net", 0)
-        self.card_dii.set_value(f"{dii:,.0f}", ACCENT_GREEN if dii > 0 else ACCENT_RED)
-        
-        # Support & Resistance
-        spot = pred.get("spot_price", 0)
-        
-        if pred.get("resistances"):
-            for i, tile in enumerate(self.res_tiles):
-                if i < len(pred["resistances"]):
-                    r = pred["resistances"][i]
-                    dist = ((r['price'] - spot) / spot) * 100
-                    tile.lbl_level.setText(f"{r['price']:,.0f}")
-                    tile.lbl_level.setStyleSheet(f"color: {ACCENT_GREEN}; font-size: 18px; font-weight: bold; border: none; background: transparent;")
-                    tile.lbl_stats.setText(f"Dist: +{dist:.1f}%  |  Str: {r['strength']:.1f}")
-                else:
-                    tile.lbl_level.setText("—")
-                    tile.lbl_stats.setText("Dist: —  |  Str: —")
-                    tile.lbl_level.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 18px; font-weight: bold; border: none; background: transparent;")
-        
-        if pred.get("supports"):
-            for i, tile in enumerate(self.support_tiles):
-                if i < len(pred["supports"]):
-                    s = pred["supports"][i]
-                    dist = ((spot - s['price']) / spot) * 100
-                    tile.lbl_level.setText(f"{s['price']:,.0f}")
-                    tile.lbl_level.setStyleSheet(f"color: {ACCENT_RED}; font-size: 18px; font-weight: bold; border: none; background: transparent;")
-                    tile.lbl_stats.setText(f"Dist: -{dist:.1f}%  |  Str: {s['strength']:.1f}")
-                else:
-                    tile.lbl_level.setText("—")
-                    tile.lbl_stats.setText("Dist: —  |  Str: —")
-                    tile.lbl_level.setStyleSheet(f"color: {TEXT_PRIMARY}; font-size: 18px; font-weight: bold; border: none; background: transparent;")
+        poc_dist = pred.get("vol_poc_dist_20", 0.0)
+        poc_color = ACCENT_GREEN if abs(poc_dist) < 0.5 else ACCENT_GOLD if abs(poc_dist) < 1.5 else ACCENT_RED
+        self.card_poc.set_value(f"{poc_dist:+.1f}%", poc_color)
     
     # ─────────────────────────────────────────────────────────────────────────
     # FORECAST UPDATE
@@ -3643,22 +4263,39 @@ class DavidOracleWindow(QMainWindow):
             else:
                 item.setForeground(QColor(ACCENT_GREEN))
             self.csv_table.setItem(i, 4, item)
+            
+        # Features Table Update
+        feats = status.get("features", [])
+        self.feat_table.setRowCount(len(feats))
+        features_all_good = True
+        for i, f in enumerate(feats):
+            self.feat_table.setItem(i, 0, QTableWidgetItem(f["name"]))
+            self.feat_table.setItem(i, 1, QTableWidgetItem(f["value"]))
+            
+            status_item = QTableWidgetItem(f["status"])
+            status_item.setForeground(QColor(ACCENT_GREEN if f["exists"] else ACCENT_RED))
+            self.feat_table.setItem(i, 2, status_item)
+            if not f["exists"]:
+                features_all_good = False
+
+        # Mini Inspector Update (ELI5 left panel)
+        csv_stale = any(s.get("is_stale", False) for s in status.get("csv", []))
+        csv_missing = any(not s.get("exists", True) for s in status.get("csv", []))
         
-        # Mini inspector (left panel)
-        self.mini_inspector.setRowCount(len(csv_data))
-        for i, s in enumerate(csv_data):
-            name_item = QTableWidgetItem(s["name"])
-            date_item = QTableWidgetItem(s["latest_date"])
+        status_text = ""
+        if csv_missing:
+            status_text += "🔴 Missing Core Data\n"
+        elif csv_stale:
+            status_text += "🟡 Data is Stale\n"
+        else:
+            status_text += "🟢 Core Data Ready\n"
             
-            if s["is_stale"]:
-                date_item.setForeground(QColor(ACCENT_GOLD))
-            elif not s["exists"]:
-                date_item.setForeground(QColor(ACCENT_RED))
-            else:
-                date_item.setForeground(QColor(ACCENT_GREEN))
+        if not features_all_good:
+            status_text += "🔴 Missing Institutional Features"
+        else:
+            status_text += "🟢 Features Ready"
             
-            self.mini_inspector.setItem(i, 0, name_item)
-            self.mini_inspector.setItem(i, 1, date_item)
+        self.data_status_label.setText(status_text)
         
         # Model table
         model_data = status.get("models", [])

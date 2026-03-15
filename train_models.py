@@ -62,7 +62,7 @@ def train_all():
     regime_models = {}
     for r_name in ["TRENDING", "CHOPPY", "VOLATILE"]:
         df_regime = df[df.apply(classify_regime, axis=1) == r_name].copy()
-        if len(df_regime) < 200:
+        if len(df_regime) < 50:
             df_regime = df.copy()
         m = EnsembleClassifier()
         m.train(df_regime, features, verbose=False)

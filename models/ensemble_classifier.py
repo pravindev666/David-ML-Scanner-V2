@@ -17,27 +17,27 @@ from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import accuracy_score, classification_report, f1_score
 from sklearn.preprocessing import StandardScaler
 
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils import MODEL_DIR, UP, DOWN, SIDEWAYS, C
+
 try:
     from xgboost import XGBClassifier
 except ImportError:
     XGBClassifier = None
-    print("[WARN] xgboost not installed. Install with: pip install xgboost")
+    print(f"[WARN] xgboost not installed. Install with: pip install xgboost")
 
 try:
     from lightgbm import LGBMClassifier
 except ImportError:
     LGBMClassifier = None
-    print("[WARN] lightgbm not installed. Install with: pip install lightgbm")
+    print(f"[WARN] lightgbm not installed. Install with: pip install lightgbm")
 
 try:
     from catboost import CatBoostClassifier
 except ImportError:
     CatBoostClassifier = None
-    print("[WARN] catboost not installed. Install with: pip install catboost")
-
-import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils import MODEL_DIR, UP, DOWN, SIDEWAYS, C
+    print(f"[WARN] catboost not installed. Install with: pip install catboost")
 
 
 TARGET_MAP = {0: UP, 1: DOWN, 2: SIDEWAYS}
@@ -329,7 +329,10 @@ class EnsembleClassifier:
         combined_probs = np.zeros((len(X_test), 3))
         for name, model in temp_models.items():
             probs = model.predict_proba(X_test_scaled)
-            combined_probs += probs / len(temp_models)
+            combined_probs += probs * self.weights.get(name, 1.0 / len(temp_models))
+            
+        # Normalize probabilities like production predict() does
+        combined_probs /= combined_probs.sum(axis=1, keepdims=True)
         
         y_pred = np.argmax(combined_probs, axis=1)
         
